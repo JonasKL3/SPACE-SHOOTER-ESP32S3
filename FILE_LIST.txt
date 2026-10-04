@@ -1,10 +1,8 @@
 .gitignore
 CHANGELOG.md
 CREDITS.md
-FILE_LIST.txt
 LICENSE-NOTICE.md
 README.md
-SHA256SUMS.txt
 VERSION
 docs/CONTROLS.md
 docs/HARDWARE.md
@@ -13,3 +11,4 @@ docs/VERSIONING.md
 firmware/SPACE_SHOOTER_ESP32S3/SPACE_SHOOTER_ESP32S3.ino
 licenses/THIRD_PARTY_NOTICE.md
 references/original/space-shooter-v1.0.0.txt
+references/original/space-shooter-v1.1.0.txt

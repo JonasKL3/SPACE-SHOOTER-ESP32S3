@@ -2,11 +2,13 @@
 
 Mini game arcade para **ESP32-S3** com display **ILI9341 2.8\" (320x240)** e controle Bluetooth pelo **Dabble GamePad**.
 
-> Baseline inicial deste projeto: **v1.0.0**.
+> Versão atual: **v1.1.0**. Baseline inicial: **v1.0.0**.
 
-## Recursos da v1.0.0
+## Recursos da v1.1.0
 
-- Nave controlada pelo D-pad do Dabble.
+- Nave controlada pelo **D-pad** ou pelo **joystick analógico** do Dabble.
+- Movimento analógico proporcional com zona morta central.
+- Prioridade automática do D-pad para evitar interferência de drift analógico.
 - Tiro com **CROSS** ou **CIRCLE**.
 - **START** inicia, pausa, continua ou reinicia a partida.
 - **SELECT** retorna ao menu quando estiver em Game Over.
@@ -29,7 +31,7 @@ O projeto foi organizado para a mesma família de hardware utilizada no projeto 
 - Bluetooth BLE
 - Aplicativo Dabble no modo GamePad
 
-O código da v1.0.0 não utiliza Wi-Fi, LittleFS ou ROMs.
+O código da v1.1.0 não utiliza Wi-Fi, LittleFS ou ROMs.
 
 ## Estrutura do repositório
 
@@ -47,7 +49,8 @@ SPACE-SHOOTER-ESP32S3/
 │   └── THIRD_PARTY_NOTICE.md
 ├── references/
 │   └── original/
-│       └── space-shooter-v1.0.0.txt
+│       ├── space-shooter-v1.0.0.txt
+│       └── space-shooter-v1.1.0.txt
 ├── .gitignore
 ├── CHANGELOG.md
 ├── CREDITS.md
@@ -80,14 +83,17 @@ Veja `docs/INSTALLATION.md` para detalhes.
 
 | Dabble | Função |
 |---|---|
-| D-pad UP/DOWN/LEFT/RIGHT | Mover a nave |
+| D-pad UP/DOWN/LEFT/RIGHT | Mover a nave digitalmente |
+| Joystick analógico X/Y | Mover a nave proporcionalmente |
 | CROSS / CIRCLE | Atirar |
 | START | Iniciar / pausar / continuar / reiniciar |
 | SELECT | Voltar ao menu durante Game Over |
 
-## Estado da v1.0.0
+## Estado da v1.1.0
 
-Esta versão representa a **baseline inicial**. O objetivo do versionamento é preservar esta versão e aplicar correções em releases posteriores (`v1.0.1`, `v1.0.2` etc.), sem reescrever retroativamente o histórico.
+Esta versão adiciona suporte ao **joystick analógico** sem remover os controles digitais da v1.0.0. O D-pad tem prioridade quando acionado, evitando que drift do analógico altere a velocidade do movimento digital.
+
+A `v1.0.0` permanece preservada como baseline inicial do projeto.
 
 ## Projeto relacionado
 
