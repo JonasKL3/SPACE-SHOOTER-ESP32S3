@@ -1,4 +1,4 @@
-# Instalação — SPACE SHOOTER v1.0.0
+# Instalação — SPACE SHOOTER v1.1.0
 
 ## 1. Ambiente
 
@@ -13,9 +13,30 @@ Instale:
 
 O sketch também utiliza APIs padrão do Arduino/ESP32, incluindo `esp_random()`.
 
-## 3. Display
+## 3. Display / TFT_eSPI
 
-Configure `TFT_eSPI` para o display ILI9341 e para a pinagem utilizada na sua placa.
+O repositório inclui a configuração de hardware validada em:
+
+```text
+config/TFT_eSPI/User_Setup.h
+```
+
+Copie esse arquivo para a biblioteca `TFT_eSPI`, substituindo o `User_Setup.h` ativo antes de compilar.
+
+A configuração incluída usa:
+
+- ILI9341 via SPI
+- TFT MISO: GPIO 13
+- TFT MOSI: GPIO 11
+- TFT SCLK: GPIO 12
+- TFT CS: GPIO 10
+- TFT DC/RS: GPIO 9
+- TFT RESET: GPIO 4
+- XPT2046 TOUCH CS: GPIO 14
+- TOUCH IRQ: GPIO 17 (reservado; não utilizado atualmente)
+- SPI do TFT: 40 MHz
+- SPI de leitura: 20 MHz
+- SPI do touch: 2.5 MHz
 
 O firmware espera uma área gráfica de 320x240 e usa rotação 2.
 

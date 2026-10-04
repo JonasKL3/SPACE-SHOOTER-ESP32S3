@@ -79,6 +79,16 @@ firmware/SPACE_SHOOTER_ESP32S3/SPACE_SHOOTER_ESP32S3.ino
 
 Veja `docs/INSTALLATION.md` para detalhes.
 
+## Configuração TFT_eSPI
+
+A configuração de hardware validada para **ESP32-S3 N16R8 + ILI9341 + XPT2046** está incluída em:
+
+```text
+config/TFT_eSPI/User_Setup.h
+```
+
+Antes de compilar, use esse arquivo como `User_Setup.h` da biblioteca `TFT_eSPI`. Ele contém a pinagem do display/touch e as frequências SPI usadas neste projeto.
+
 ## Controles
 
 | Dabble | Função |

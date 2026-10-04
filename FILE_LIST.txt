@@ -4,6 +4,7 @@ CREDITS.md
 LICENSE-NOTICE.md
 README.md
 VERSION
+config/TFT_eSPI/User_Setup.h
 docs/CONTROLS.md
 docs/HARDWARE.md
 docs/INSTALLATION.md
