@@ -1,53 +1,68 @@
 # Changelog
 
-Todas as mudanças relevantes do projeto serão documentadas neste arquivo.
+Todas as mudanças relevantes do projeto são registradas neste arquivo.
 
-O projeto seguirá versionamento semântico na forma `MAJOR.MINOR.PATCH`.
+## [2.0.0] - 2026-10-08
+
+### Added
+
+- Menu navegável com START GAME, SCORE e RESET SCORE.
+- Persistência de high score, partidas e pontuação total em NVS.
+- Tela de estatísticas.
+- Quarto tipo de inimigo: atirador.
+- Projéteis inimigos direcionados ao jogador.
+- Power-up de vida extra.
+- Sistema de combo e multiplicadores de pontuação.
+- Nave e inimigos com visuais aprimorados.
+- Explosões em múltiplas camadas e partículas ampliadas.
+- Rastro de balas e HUD redesenhado.
+- Controle analógico proporcional X/Y.
+- Navegação analógica no menu.
+- Exibição de `v2.0.0` no canto inferior direito da tela inicial.
+
+### Changed
+
+- Velocidade máxima da nave ajustada para 6.0.
+- D-pad agora tem prioridade sobre o analógico.
+- Movimento diagonal normalizado para evitar ganho de velocidade.
+- Leitura do Dabble processada continuamente para reduzir latência.
+- Fluxo de input reorganizado para evitar transições duplicadas entre telas.
+
+### Fixed
+
+- Corrigido drift analógico afetando movimento digital.
+- Corrigida saída imediata da tela SCORE ao manter o botão de confirmação pressionado.
+- Corrigido processamento de dano após Game Over no mesmo frame.
+- Adicionada proteção breve após dano para evitar perda múltipla de vidas instantaneamente.
+- Corrigida detecção de novo recorde em caso de empate com o high score existente.
+- Corrigidas condições de borda em START, SELECT e confirmação de menu.
 
 ## [1.1.0] - 2026-10-04
 
-### Adicionado
+### Added
 
-- Suporte ao joystick analógico X/Y do Dabble GamePad.
-- Movimento proporcional conforme a intensidade/direção do joystick.
-- Camada de entrada unificada para controles digitais e analógicos.
+- Controle analógico X/Y através do Dabble GamePad.
+- Movimento proporcional ao deslocamento do joystick.
+- Zona morta central para reduzir drift.
 
-### Corrigido
+### Changed
 
-- Prioridade do D-pad sobre o joystick analógico para impedir interferência de drift durante o movimento digital.
-- Zona morta central do joystick para evitar movimento involuntário próximo ao centro.
-- Código-fonte revisado para remover caracteres de formatação inválidos e um caractere excedente no final do `loop()`.
+- D-pad ganhou prioridade sobre o controle analógico.
+- Input reorganizado para preservar o comportamento digital da v1.0.0.
 
-### Mantido
+### Fixed
 
-- CROSS / CIRCLE como botões de tiro.
-- START e SELECT com o mesmo comportamento da v1.0.0.
-- Mecânicas, progressão, inimigos, power-ups, HUD e renderização da v1.0.0.
-
-### Validação
-
-- Versão testada e aprovada em hardware pelo autor antes da publicação.
+- Corrigida interferência do joystick analógico no movimento digital.
+- Corrigido caractere acidental no final do loop do código recebido para revisão.
 
 ## [1.0.0] - 2026-10-04
 
-### Adicionado
+### Added
 
-- Primeira versão pública versionada do Space Shooter para ESP32-S3.
-- Suporte ao display ILI9341 320x240.
-- Controle Bluetooth com Dabble GamePad.
-- Menu inicial.
-- Estados `MENU`, `PLAYING`, `PAUSED` e `GAME_OVER`.
-- Movimento em quatro direções.
+- Primeira versão pública do SPACE SHOOTER para ESP32-S3.
+- ILI9341 320x240.
+- Dabble BLE GamePad.
+- Movimento digital.
 - Sistema de tiro.
-- Três tipos de inimigos.
-- Sistema de colisões.
-- Pontuação e high score em memória durante a sessão.
-- Progressão de nível e dificuldade.
-- Power-ups de tiro triplo e escudo.
-- Campo de estrelas.
-- Efeitos de partículas.
-- Buffer gráfico com `TFT_eSprite`.
-
-### Observação
-
-Esta release é a baseline oficial. Correções posteriores devem receber novas versões, começando em `v1.0.1`.
+- Inimigos, partículas e power-ups.
+- Score, níveis, vidas e Game Over.

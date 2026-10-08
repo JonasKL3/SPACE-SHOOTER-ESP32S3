@@ -1,77 +1,47 @@
-# Instalação — SPACE SHOOTER v1.1.0
+# Instalação — SPACE SHOOTER v2.0.0
 
-## 1. Ambiente
+## 1. Requisitos
 
-Use a Arduino IDE com suporte ao ESP32-S3.
+- ESP32-S3 N16R8
+- ILI9341 2.8\"
+- Arduino IDE ou ambiente compatível com Arduino ESP32
+- Biblioteca TFT_eSPI
+- Biblioteca DabbleESP32
 
-## 2. Dependências
+A biblioteca Preferences faz parte do core ESP32.
 
-Instale:
+## 2. Configurar TFT_eSPI
 
-- TFT_eSPI
-- DabbleESP32
+O projeto inclui a configuração utilizada nos testes:
 
-O sketch também utiliza APIs padrão do Arduino/ESP32, incluindo `esp_random()`.
+`config/TFT_eSPI/User_Setup.h`
 
-## 3. Display / TFT_eSPI
+Copie esse arquivo para a localização de configuração da sua instalação da TFT_eSPI, substituindo ou selecionando o setup conforme o método utilizado no seu ambiente.
 
-O repositório inclui a configuração de hardware validada em:
+A pinagem completa está documentada em `docs/HARDWARE.md`.
 
-```text
-config/TFT_eSPI/User_Setup.h
-```
-
-Copie esse arquivo para a biblioteca `TFT_eSPI`, substituindo o `User_Setup.h` ativo antes de compilar.
-
-A configuração incluída usa:
-
-- ILI9341 via SPI
-- TFT MISO: GPIO 13
-- TFT MOSI: GPIO 11
-- TFT SCLK: GPIO 12
-- TFT CS: GPIO 10
-- TFT DC/RS: GPIO 9
-- TFT RESET: GPIO 4
-- XPT2046 TOUCH CS: GPIO 14
-- TOUCH IRQ: GPIO 17 (reservado; não utilizado atualmente)
-- SPI do TFT: 40 MHz
-- SPI de leitura: 20 MHz
-- SPI do touch: 2.5 MHz
-
-O firmware espera uma área gráfica de 320x240 e usa rotação 2.
-
-## 4. Abrir o firmware
+## 3. Firmware
 
 Abra:
 
-```text
-firmware/SPACE_SHOOTER_ESP32S3/SPACE_SHOOTER_ESP32S3.ino
-```
+`firmware/SPACE_SHOOTER_ESP32S3/SPACE_SHOOTER_ESP32S3.ino`
 
-## 5. Compilar e gravar
+Selecione a placa ESP32-S3 correspondente ao seu hardware e compile.
 
-Selecione sua placa ESP32-S3, porta serial e configurações compatíveis com o módulo utilizado. Compile e faça upload.
+## 4. Controle
 
-## 6. Bluetooth
+No smartphone, utilize o módulo GamePad do Dabble e conecte ao dispositivo BLE:
 
-Após iniciar, o firmware executa:
+`ESP32-S3-GAMEPAD`
 
-```cpp
-Dabble.begin("ESP32-S3-GAMEPAD");
-```
+## 5. Teste recomendado
 
-No aplicativo Dabble:
+Após gravar:
 
-1. Conecte-se a `ESP32-S3-GAMEPAD`.
-2. Abra o módulo GamePad.
-3. Pressione START para iniciar.
-
-## 7. Serial
-
-Baud rate:
-
-```text
-115200
-```
-
-O firmware imprime informações de inicialização e mudanças de estado no Monitor Serial.
+1. Verifique a tela inicial e a identificação `v2.0.0` no canto inferior direito.
+2. Teste D-pad nas quatro direções.
+3. Teste o analógico e confirme que a nave para no centro.
+4. Teste CROSS/CIRCLE.
+5. Teste START e SELECT.
+6. Entre em SCORE e volte ao menu.
+7. Verifique se high score e estatísticas permanecem após reiniciar o ESP32.

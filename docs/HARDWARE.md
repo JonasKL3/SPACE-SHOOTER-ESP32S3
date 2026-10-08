@@ -1,48 +1,55 @@
 # Hardware
 
-## Plataforma
+Configuração validada para o projeto SPACE-SHOOTER-ESP32S3.
 
-- ESP32-S3
-- Display TFT ILI9341 2.8\"
-- Resolução lógica utilizada pelo jogo: 320x240
-- Rotação configurada no firmware: `2`
-- Controle sem fio via BLE/Dabble
+## Placa
+
+- ESP32-S3 N16R8
+
+## Display
+
+- ILI9341 2.8\"
+- 240 x 320 pixels
+- SPI
+- Uso no jogo em orientação 320 x 240
+
+## Pinagem TFT
+
+| Função | GPIO |
+|---|---:|
+| MISO / SDO | 13 |
+| MOSI / SDI | 11 |
+| SCK | 12 |
+| CS | 10 |
+| DC / RS | 9 |
+| RESET | 4 |
+| LED / BL | 3.3V |
+
+## Touch XPT2046
+
+| Função | GPIO |
+|---|---:|
+| T_CLK | 12 |
+| T_DIN | 11 |
+| T_DO | 13 |
+| T_CS | 14 |
+| T_IRQ | 17 |
+
+O touch compartilha o barramento SPI do display. O jogo atualmente não depende do touch para controle.
 
 ## TFT_eSPI
 
-O sketch cria o display com:
+A configuração testada está em:
 
-```cpp
-TFT_eSPI tft = TFT_eSPI(320, 240);
-```
+`config/TFT_eSPI/User_Setup.h`
 
-E configura:
+Parâmetros principais utilizados:
 
-```cpp
-tft.setRotation(2);
-```
+- ILI9341_DRIVER
+- SPI_FREQUENCY 40000000
+- SPI_READ_FREQUENCY 20000000
+- SPI_TOUCH_FREQUENCY 2500000
+- USE_HSPI_PORT
+- USE_DMA_TO_TFT
 
-A pinagem física do ILI9341 não está definida dentro do sketch. Ela é configurada pela biblioteca `TFT_eSPI`.
-
-O setup validado para este projeto está versionado em:
-
-```text
-config/TFT_eSPI/User_Setup.h
-```
-
-## Pinagem validada
-
-| Sinal | GPIO |
-|---|---:|
-| TFT MISO | 13 |
-| TFT MOSI | 11 |
-| TFT SCLK | 12 |
-| TFT CS | 10 |
-| TFT DC/RS | 9 |
-| TFT RESET | 4 |
-| TOUCH CS | 14 |
-| TOUCH IRQ | 17 |
-
-O XPT2046 compartilha SCLK, MOSI e MISO com o display. O backlight do módulo está ligado diretamente a 3.3 V.
-
-A configuração validada usa `SPI_FREQUENCY` de 40 MHz, leitura a 20 MHz e touch a 2.5 MHz.
+Use o arquivo fornecido no repositório para reproduzir a configuração utilizada nos testes.

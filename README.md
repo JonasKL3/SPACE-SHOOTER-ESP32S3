@@ -1,127 +1,85 @@
-# SPACE SHOOTER — ESP32-S3
+# SPACE-SHOOTER-ESP32S3
 
-Mini game arcade para **ESP32-S3** com display **ILI9341 2.8\" (320x240)** e controle Bluetooth pelo **Dabble GamePad**.
+Mini game **Space Shooter** desenvolvido para **ESP32-S3 N16R8**, display **ILI9341 2.8\" 320x240**, touch **XPT2046** e controle **Dabble BLE GamePad**.
 
-> Versão atual: **v1.1.0**. Baseline inicial: **v1.0.0**.
+## Versão atual
 
-## Recursos da v1.1.0
+**v2.0.0**
 
-- Nave controlada pelo **D-pad** ou pelo **joystick analógico** do Dabble.
-- Movimento analógico proporcional com zona morta central.
-- Prioridade automática do D-pad para evitar interferência de drift analógico.
-- Tiro com **CROSS** ou **CIRCLE**.
-- **START** inicia, pausa, continua ou reinicia a partida.
-- **SELECT** retorna ao menu quando estiver em Game Over.
-- 3 tipos de inimigos.
-- Sistema de vidas, pontuação e high score durante a sessão.
-- Progressão de nível e aumento de dificuldade.
-- Power-up de tiro triplo.
-- Power-up de escudo.
-- Campo de estrelas animado.
-- Efeitos de partículas e explosões.
-- Renderização em `TFT_eSprite` para reduzir flicker.
-- Loop-alvo de aproximadamente 60 FPS (`FRAME_MS = 16`).
+Esta versão representa uma evolução ampla do projeto, com novo menu, persistência em NVS, estatísticas, novos inimigos, tiros inimigos, combo, power-ups adicionais, melhorias visuais e controle analógico.
 
-## Hardware de referência
+## Principais recursos da v2.0.0
 
-O projeto foi organizado para a mesma família de hardware utilizada no projeto HALO2600-RETRO:
-
-- ESP32-S3 DEV MODULE
-- Display TFT ILI9341 2.8\"
-- Bluetooth BLE
-- Aplicativo Dabble no modo GamePad
-
-O código da v1.1.0 não utiliza Wi-Fi, LittleFS ou ROMs.
-
-## Estrutura do repositório
-
-```text
-SPACE-SHOOTER-ESP32S3/
-├── firmware/
-│   └── SPACE_SHOOTER_ESP32S3/
-│       └── SPACE_SHOOTER_ESP32S3.ino
-├── docs/
-│   ├── CONTROLS.md
-│   ├── HARDWARE.md
-│   ├── INSTALLATION.md
-│   └── VERSIONING.md
-├── licenses/
-│   └── THIRD_PARTY_NOTICE.md
-├── references/
-│   └── original/
-│       ├── space-shooter-v1.0.0.txt
-│       └── space-shooter-v1.1.0.txt
-├── .gitignore
-├── CHANGELOG.md
-├── CREDITS.md
-├── FILE_LIST.txt
-├── LICENSE-NOTICE.md
-├── README.md
-├── SHA256SUMS.txt
-└── VERSION
-```
-
-## Instalação rápida
-
-1. Abra a Arduino IDE.
-2. Instale o suporte para ESP32 e selecione uma placa ESP32-S3 compatível.
-3. Instale as bibliotecas **TFT_eSPI** e **DabbleESP32**.
-4. Configure o `TFT_eSPI` para o seu ILI9341 e os pinos utilizados no seu hardware.
-5. Abra:
-
-```text
-firmware/SPACE_SHOOTER_ESP32S3/SPACE_SHOOTER_ESP32S3.ino
-```
-
-6. Compile e grave no ESP32-S3.
-7. Abra o aplicativo Dabble, conecte-se ao dispositivo Bluetooth `ESP32-S3-GAMEPAD` e use o módulo GamePad.
-8. Monitor Serial: **115200 baud**.
-
-Veja `docs/INSTALLATION.md` para detalhes.
-
-## Configuração TFT_eSPI
-
-A configuração de hardware validada para **ESP32-S3 N16R8 + ILI9341 + XPT2046** está incluída em:
-
-```text
-config/TFT_eSPI/User_Setup.h
-```
-
-Antes de compilar, use esse arquivo como `User_Setup.h` da biblioteca `TFT_eSPI`. Ele contém a pinagem do display/touch e as frequências SPI usadas neste projeto.
+- Menu navegável com START GAME, SCORE e RESET SCORE
+- High score persistente em NVS
+- Estatísticas de partidas e pontuação acumulada
+- 4 tipos de inimigos
+- Inimigo atirador com projéteis direcionados
+- Power-ups de tiro triplo, escudo e vida extra
+- Sistema de combo com multiplicadores
+- Explosões e partículas aprimoradas
+- Rastro visual dos tiros
+- HUD redesenhado
+- Nave com visual mais detalhado
+- Controle digital via D-pad
+- Controle analógico proporcional X/Y
+- Prioridade do D-pad sobre o analógico para evitar interferência de drift
+- Movimento diagonal normalizado
+- Proteção breve após dano para evitar perda múltipla de vidas no mesmo instante
+- Identificação da versão na tela inicial
 
 ## Controles
 
-| Dabble | Função |
-|---|---|
-| D-pad UP/DOWN/LEFT/RIGHT | Mover a nave digitalmente |
-| Joystick analógico X/Y | Mover a nave proporcionalmente |
-| CROSS / CIRCLE | Atirar |
-| START | Iniciar / pausar / continuar / reiniciar |
-| SELECT | Voltar ao menu durante Game Over |
+- **D-Pad** — movimentação digital
+- **Analógico X/Y** — movimentação proporcional
+- **CROSS / CIRCLE** — atirar / confirmar
+- **START** — iniciar / pausar / continuar / reiniciar
+- **SELECT** — voltar ao menu em telas compatíveis
 
-## Estado da v1.1.0
+Consulte `docs/CONTROLS.md` para detalhes.
 
-Esta versão adiciona suporte ao **joystick analógico** sem remover os controles digitais da v1.0.0. O D-pad tem prioridade quando acionado, evitando que drift do analógico altere a velocidade do movimento digital.
+## Hardware
 
-A `v1.0.0` permanece preservada como baseline inicial do projeto.
+- ESP32-S3 N16R8
+- TFT 2.8\" ILI9341
+- XPT2046
+- Dabble BLE GamePad
 
-## Projeto relacionado
+A configuração testada da biblioteca TFT_eSPI está em:
 
-Estrutura de repositório inspirada no projeto do mesmo autor:
+`config/TFT_eSPI/User_Setup.h`
 
-**HALO2600-RETRO — Atari 2600 Emulator for ESP32-S3**  
-https://github.com/JonasKL3/HALO2600-RETRO___Atari-2600-Emulator-for-ESP32-S3
+Consulte `docs/HARDWARE.md` e `docs/INSTALLATION.md` antes de compilar.
 
-## Bibliotecas de terceiros
+## Estrutura
 
-Este projeto utiliza bibliotecas externas, incluindo:
+```text
+firmware/                     Código-fonte principal
+config/TFT_eSPI/              Configuração testada da TFT_eSPI
+docs/                         Documentação
+licenses/                     Avisos de terceiros
+references/original/          Fontes históricas das versões
+CHANGELOG.md                  Histórico de versões
+VERSION                       Versão atual
+SHA256SUMS.txt                Checksums dos arquivos
+```
+
+## Histórico
+
+- **v1.0.0** — primeira versão pública
+- **v1.1.0** — controle analógico e melhorias de input
+- **v2.0.0** — grande atualização de gameplay, interface, persistência e controles
+
+## Compilação
+
+O projeto utiliza Arduino/ESP32 e as bibliotecas:
 
 - TFT_eSPI
 - DabbleESP32
-- Arduino ESP32 core
+- Preferences (ESP32)
 
-Cada biblioteca permanece sujeita aos termos de sua própria licença. Veja `licenses/THIRD_PARTY_NOTICE.md`.
+Antes de compilar, instale a configuração fornecida em `config/TFT_eSPI/User_Setup.h` conforme explicado em `docs/INSTALLATION.md`.
 
-## Licença
+## Status
 
-Nenhuma licença ampla de redistribuição do código autoral é concedida automaticamente por este pacote. Consulte `LICENSE-NOTICE.md` antes de reutilizar ou redistribuir o código.
+**v2.0.0 testada no hardware e aprovada para publicação.**

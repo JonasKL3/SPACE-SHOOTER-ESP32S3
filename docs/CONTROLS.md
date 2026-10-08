@@ -1,32 +1,36 @@
-# Controles — v1.1.0
+# Controles — SPACE SHOOTER v2.0.0
 
-O jogo utiliza o módulo **GamePad** do aplicativo Dabble e agora aceita **D-pad digital** ou **joystick analógico** para movimentação.
+## Dabble GamePad
 
-| Controle | Ação |
-|---|---|
-| D-pad UP | Mover nave para cima |
-| D-pad DOWN | Mover nave para baixo |
-| D-pad LEFT | Mover nave para a esquerda |
-| D-pad RIGHT | Mover nave para a direita |
-| Joystick analógico X/Y | Mover nave proporcionalmente |
-| CROSS | Atirar |
-| CIRCLE | Atirar |
-| START no menu | Iniciar partida |
-| START jogando | Pausar |
-| START pausado | Continuar |
-| START no Game Over | Reiniciar |
-| SELECT no Game Over | Voltar ao menu |
+### Movimento
 
-## Prioridade de entrada
+- D-Pad UP — mover para cima
+- D-Pad DOWN — mover para baixo
+- D-Pad LEFT — mover para a esquerda
+- D-Pad RIGHT — mover para a direita
+- Analógico X/Y — movimentação proporcional
 
-Quando qualquer direção do D-pad estiver pressionada, o jogo usa somente o controle digital e ignora o joystick analógico naquele frame. Isso evita interferência de drift do analógico durante o uso do D-pad.
+O D-pad possui prioridade sobre o analógico. Quando um botão do D-pad está pressionado, o valor analógico é ignorado para evitar interferência causada por drift.
 
-Quando o D-pad não estiver ativo, o joystick analógico controla a nave proporcionalmente, com zona morta central.
+A movimentação diagonal é normalizada para manter velocidade semelhante ao movimento em linha reta.
 
-## Bluetooth
+### Ação
 
-Nome configurado:
+- CROSS / CIRCLE — atirar durante o jogo
+- CROSS — confirmar opções do menu
+- START — iniciar, pausar, continuar ou reiniciar conforme o estado
+- SELECT — voltar para o menu em telas compatíveis
 
-```text
-ESP32-S3-GAMEPAD
-```
+## Menu
+
+- UP / DOWN ou analógico vertical — navegar
+- CROSS / START — confirmar
+
+## Tela de estatísticas
+
+- CROSS / SELECT / START — voltar
+
+## Game Over
+
+- START — reiniciar
+- SELECT — voltar ao menu
