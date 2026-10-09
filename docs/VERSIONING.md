@@ -1,36 +1,11 @@
 # Versionamento
 
-Este projeto utiliza **Semantic Versioning** (`MAJOR.MINOR.PATCH`).
+O projeto utiliza etiquetas `MAJOR.MINOR.PATCH` como histórico de lançamentos. A branch `main` mantém os arquivos da versão estável mais recente; cada GitHub Release está associada a uma tag e um estado específico do repositório.
 
-## PATCH — v1.0.1, v1.0.2...
+- `PATCH` (ex.: `v3.0.1`): correções compatíveis.
+- `MINOR` (ex.: `v3.1.0`): funcionalidades novas compatíveis.
+- `MAJOR` (ex.: `v3.0.0`): atualização estrutural ou importante do jogo.
 
-Usado para correções que não alteram a proposta ou compatibilidade principal do jogo.
+Para publicar: validar no hardware, fazer commit na `main`, criar a Release no GitHub com tag nova apontando para o commit da versão, e anexar o ZIP completo. Evite alterar ZIPs de releases anteriores após a publicação.
 
-Exemplos:
-
-- correção de botão;
-- ajuste de colisão;
-- correção gráfica;
-- ajuste de timing;
-- correção de travamento.
-
-## MINOR — v1.1.0, v1.2.0...
-
-Usado para recursos novos compatíveis com a base atual.
-
-Exemplos:
-
-- novo inimigo;
-- chefe;
-- novo power-up;
-- áudio;
-- menu expandido;
-- persistência de high score.
-
-## MAJOR — v2.0.0
-
-Reservado para alterações grandes de arquitetura, controles ou compatibilidade.
-
-## Regra do projeto
-
-Uma versão publicada não será alterada retroativamente. A `v1.0.0` permanece preservada como baseline; qualquer correção gera uma nova versão.
+A v3.0.0 adiciona campanha, modo endless, chefes e seleção de skins. Ao migrar, mantenha a partição NVS para preservar estatísticas e desbloqueios.

@@ -1,47 +1,33 @@
-# Instalação — SPACE SHOOTER v2.0.0
+# Instalação — SPACE SHOOTER v3.0.0
 
 ## 1. Requisitos
 
 - ESP32-S3 N16R8
-- ILI9341 2.8\"
-- Arduino IDE ou ambiente compatível com Arduino ESP32
-- Biblioteca TFT_eSPI
-- Biblioteca DabbleESP32
+- ILI9341 2.8" SPI
+- Arduino IDE e core Arduino-ESP32
+- Bibliotecas TFT_eSPI e DabbleESP32
+- Dabble GamePad instalado no smartphone
 
-A biblioteca Preferences faz parte do core ESP32.
+`Preferences` está incluída no core ESP32.
 
-## 2. Configurar TFT_eSPI
+## 2. Display
 
-O projeto inclui a configuração utilizada nos testes:
+Use **`config/TFT_eSPI/User_Setup.h`** como configuração da TFT_eSPI, assegurando que a biblioteca carregue este setup em vez do padrão. Confira GPIOs, frequência de SPI e alimentação em `docs/HARDWARE.md`.
 
-`config/TFT_eSPI/User_Setup.h`
+## 3. Código
 
-Copie esse arquivo para a localização de configuração da sua instalação da TFT_eSPI, substituindo ou selecionando o setup conforme o método utilizado no seu ambiente.
+Abra `firmware/SPACE_SHOOTER_ESP32S3/SPACE_SHOOTER_ESP32S3.ino`. Selecione a placa ESP32-S3 correspondente. Não é necessário instalar bibliotecas para o XPT2046 nesta versão (touch não utilizado).
 
-A pinagem completa está documentada em `docs/HARDWARE.md`.
+## 4. Compilar e gravar
 
-## 3. Firmware
+Compile e grave o firmware. Caso a configuração TFT_eSPI contenha uma opção não suportada pela sua versão da biblioteca, revise-a antes de compilar; a configuração foi fornecida como referência do hardware do autor.
 
-Abra:
+## 5. BLE
 
-`firmware/SPACE_SHOOTER_ESP32S3/SPACE_SHOOTER_ESP32S3.ino`
+No Dabble, conecte ao dispositivo BLE `ESP32-S3-GAMEPAD`. Abra o módulo GamePad.
 
-Selecione a placa ESP32-S3 correspondente ao seu hardware e compile.
+## 6. Conferência antes da publicação
 
-## 4. Controle
+A tela inicial deve mostrar `v3.0.0` no canto inferior direito. Siga `docs/TEST_PLAN_V3.md` para confirmar analógico, navegação, boss, NVS e skins no equipamento real.
 
-No smartphone, utilize o módulo GamePad do Dabble e conecte ao dispositivo BLE:
-
-`ESP32-S3-GAMEPAD`
-
-## 5. Teste recomendado
-
-Após gravar:
-
-1. Verifique a tela inicial e a identificação `v2.0.0` no canto inferior direito.
-2. Teste D-pad nas quatro direções.
-3. Teste o analógico e confirme que a nave para no centro.
-4. Teste CROSS/CIRCLE.
-5. Teste START e SELECT.
-6. Entre em SCORE e volte ao menu.
-7. Verifique se high score e estatísticas permanecem após reiniciar o ESP32.
+**Nota:** o teste de sintaxe com APIs simuladas não substitui compilação Arduino nem teste em ESP32-S3.

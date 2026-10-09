@@ -2,6 +2,38 @@
 
 Todas as mudanças relevantes do projeto são registradas neste arquivo.
 
+## [3.0.0] - 2026-10-08
+
+### Added
+
+- Modos **Campanha** (até o nível 10) e **Endless**.
+- Mini-boss nos níveis múltiplos de cinco; chefão final da campanha.
+- Boss com barra de vida, duas fases e três padrões de ataque.
+- Quatro slots de skins com seleção e progresso salvos na NVS.
+- Desbloqueios por pontuação acumulada e por conclusão da campanha.
+- Exibição de `v3.0.0` no menu principal.
+
+### Changed
+
+- Restaurado o controle analógico proporcional aprovado em versões anteriores, com prioridade para o D-pad.
+- Movimento máximo configurado para 6.0; diagonal normalizada e eixo Y invertido para coordenadas de tela.
+- Dabble processado continuamente em vez de usar polling de 30 ms.
+- Ajustados os nomes visuais de CIANO/DOURADA no menu, preservando índices internos e dados NVS.
+
+### Fixed
+
+- Corrigida a demora artificial para detectar analógico e a zona morta central.
+- Corrigidas transições inesperadas entre telas por botões mantidos pressionados.
+- Prevenida perda consecutiva de vidas por projéteis, inimigos ou contato com boss (700 ms de proteção).
+- Corrigida a contabilização duplicada do Game Over.
+- Corrigida a identificação incorreta de novo recorde quando apenas empatado.
+- Corrigido o encerramento e salvamento da campanha após derrotar o último chefe.
+
+### Verification
+
+- Passou em verificação de sintaxe C++ com substitutos das dependências.
+- Validação final da correção dos nomes no dispositivo físico pendente de confirmação.
+
 ## [2.0.0] - 2026-10-08
 
 ### Added

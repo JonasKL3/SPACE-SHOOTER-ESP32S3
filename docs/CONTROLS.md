@@ -1,36 +1,23 @@
-# Controles — SPACE SHOOTER v2.0.0
+# Controles — SPACE SHOOTER v3.0.0
 
-## Dabble GamePad
+## GamePad Dabble
 
-### Movimento
+| Ação | Comando |
+|---|---|
+| Movimentar a nave | D-pad ou joystick analógico X/Y |
+| Atirar | CROSS ou CIRCLE |
+| Confirmar uma opção | CROSS ou START (na maioria dos menus) |
+| Pausar/continuar | START durante a partida |
+| Voltar | SELECT nas telas que permitem retorno |
+| Encerrar a tela Game Over | START ou SELECT |
 
-- D-Pad UP — mover para cima
-- D-Pad DOWN — mover para baixo
-- D-Pad LEFT — mover para a esquerda
-- D-Pad RIGHT — mover para a direita
-- Analógico X/Y — movimentação proporcional
+O D-pad tem prioridade sobre o joystick analógico; a zona morta elimina leitura nos valores `-1, 0, +1`. A diagonal é normalizada e a velocidade máxima é `6.0` por frame.
 
-O D-pad possui prioridade sobre o analógico. Quando um botão do D-pad está pressionado, o valor analógico é ignorado para evitar interferência causada por drift.
+## Menus
 
-A movimentação diagonal é normalizada para manter velocidade semelhante ao movimento em linha reta.
+- **MENU**: START GAME, SKIN, SCORE, RESET DATA. Atenção: RESET DATA remove high score, estatísticas e skins desbloqueadas.
+- **MODE SELECT**: CAMPANHA ou ENDLESS.
+- **SKIN SELECT**: navegar entre quatro slots; confirmar com CROSS/START somente se desbloqueado.
+- **SCORES**: CROSS/SELECT/START para voltar ao menu.
 
-### Ação
-
-- CROSS / CIRCLE — atirar durante o jogo
-- CROSS — confirmar opções do menu
-- START — iniciar, pausar, continuar ou reiniciar conforme o estado
-- SELECT — voltar para o menu em telas compatíveis
-
-## Menu
-
-- UP / DOWN ou analógico vertical — navegar
-- CROSS / START — confirmar
-
-## Tela de estatísticas
-
-- CROSS / SELECT / START — voltar
-
-## Game Over
-
-- START — reiniciar
-- SELECT — voltar ao menu
+Para navegar, use UP/DOWN do D-pad ou o eixo Y analógico. Não há controle por touchscreen nesta versão.
