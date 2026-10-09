@@ -1,33 +1,14 @@
-# Instalação — SPACE SHOOTER v3.0.0
+# Instalação — SPACE SHOOTER v4.0.0
 
-## 1. Requisitos
+1. Instale o core Arduino-ESP32 e selecione a placa ESP32-S3 N16R8 correspondente.
+2. Instale as bibliotecas **TFT_eSPI** e **DabbleESP32**. `Preferences` integra o core ESP32.
+3. Configure a TFT_eSPI com `config/TFT_eSPI/User_Setup.h` deste repositório, confirmando que esse setup está efetivamente ativo.
+4. Abra `firmware/SPACE_SHOOTER_ESP32S3/SPACE_SHOOTER_ESP32S3.ino` na Arduino IDE.
+5. Compile, grave e conecte o GamePad do Dabble ao nome BLE `ESP32-S3-GAMEPAD`.
+6. Confirme se o menu inicial mostra `v4.0.0`; teste direções, tiro, navegação, HUD e desempenho.
+7. Se for atualização da v3, **não apague a partição NVS**, para manter recorde, estatísticas e skins. A conclusão dos 20 níveis possui registro próprio.
 
-- ESP32-S3 N16R8
-- ILI9341 2.8" SPI
-- Arduino IDE e core Arduino-ESP32
-- Bibliotecas TFT_eSPI e DabbleESP32
-- Dabble GamePad instalado no smartphone
+> **Atenção:** `RESET DATA` limpa os dados salvos de jogo depois de uma confirmação explícita. Cuidado ao testar esse menu.
 
-`Preferences` está incluída no core ESP32.
-
-## 2. Display
-
-Use **`config/TFT_eSPI/User_Setup.h`** como configuração da TFT_eSPI, assegurando que a biblioteca carregue este setup em vez do padrão. Confira GPIOs, frequência de SPI e alimentação em `docs/HARDWARE.md`.
-
-## 3. Código
-
-Abra `firmware/SPACE_SHOOTER_ESP32S3/SPACE_SHOOTER_ESP32S3.ino`. Selecione a placa ESP32-S3 correspondente. Não é necessário instalar bibliotecas para o XPT2046 nesta versão (touch não utilizado).
-
-## 4. Compilar e gravar
-
-Compile e grave o firmware. Caso a configuração TFT_eSPI contenha uma opção não suportada pela sua versão da biblioteca, revise-a antes de compilar; a configuração foi fornecida como referência do hardware do autor.
-
-## 5. BLE
-
-No Dabble, conecte ao dispositivo BLE `ESP32-S3-GAMEPAD`. Abra o módulo GamePad.
-
-## 6. Conferência antes da publicação
-
-A tela inicial deve mostrar `v3.0.0` no canto inferior direito. Siga `docs/TEST_PLAN_V3.md` para confirmar analógico, navegação, boss, NVS e skins no equipamento real.
-
-**Nota:** o teste de sintaxe com APIs simuladas não substitui compilação Arduino nem teste em ESP32-S3.
+Para ver as métricas de desempenho, pausar durante o jogo e consultar `docs/PERFORMANCE_V4.md`.
+Para validar o lançamento, use `docs/TEST_PLAN_V4.md`.

@@ -1,23 +1,18 @@
-# Controles — SPACE SHOOTER v3.0.0
+# Controles — SPACE SHOOTER v4.0.0
 
-## GamePad Dabble
-
-| Ação | Comando |
+| Ação | Comando Dabble |
 |---|---|
-| Movimentar a nave | D-pad ou joystick analógico X/Y |
+| Movimentar a nave | D-pad ou joystick analógico |
 | Atirar | CROSS ou CIRCLE |
-| Confirmar uma opção | CROSS ou START (na maioria dos menus) |
+| Confirmar menu | CROSS ou START em menus compatíveis |
 | Pausar/continuar | START durante a partida |
-| Voltar | SELECT nas telas que permitem retorno |
-| Encerrar a tela Game Over | START ou SELECT |
+| Voltar/cancelar | SELECT onde permitido |
+| Voltar após Game Over | START ou SELECT |
+| Apagar dados | RESET DATA no menu, depois confirmar conscientemente com CROSS |
 
-O D-pad tem prioridade sobre o joystick analógico; a zona morta elimina leitura nos valores `-1, 0, +1`. A diagonal é normalizada e a velocidade máxima é `6.0` por frame.
-
-## Menus
-
-- **MENU**: START GAME, SKIN, SCORE, RESET DATA. Atenção: RESET DATA remove high score, estatísticas e skins desbloqueadas.
-- **MODE SELECT**: CAMPANHA ou ENDLESS.
-- **SKIN SELECT**: navegar entre quatro slots; confirmar com CROSS/START somente se desbloqueado.
-- **SCORES**: CROSS/SELECT/START para voltar ao menu.
-
-Para navegar, use UP/DOWN do D-pad ou o eixo Y analógico. Não há controle por touchscreen nesta versão.
+- O D-pad prevalece sobre o analógico quando acionados ao mesmo tempo.
+- Joystick proporcional com zona morta em ±1 e Y mapeado para movimento de tela.
+- Velocidade máxima configurada em 6.0 unidades por atualização lógica; diagonais normalizadas.
+- A tela PAUSA mostra indicadores de desempenho. Veja `docs/PERFORMANCE_V4.md`.
+- As quatro posições do menu de skins mostram os nomes **VERDE**, **DOURADA**, **CIANO**, **ROXA**, por compatibilidade com a correção visual adotada na v3. Os requisitos são vinculados aos índices internos, não ao texto: slot 1 = 5.000 pontos, slot 2 = vitória na campanha original, slot 3 = 20.000 pontos.
+- O touchscreen XPT2046 não é usado como comando de jogo.

@@ -1,5 +1,49 @@
 # Changelog
 
+## [4.0.0] - 2026-10-08
+
+### Added
+
+- Campanha de **20 níveis**, com quatro chefes (5/10/15/20), além do modo Endless.
+- Cinco modelos de chefe: Sentinel, Hydra, Prime, Devourer e Omega (Omega no Endless a partir do nível 25).
+- Seis tipos de arma: Padrão, Duplo, Triplo, Spread, Laser e Míssil.
+- Mísseis guiados e laser perfurante com registro de alvos já atingidos.
+- Cinco cenários dinâmicos, power-ups específicos e visuais distintos.
+- Indicadores `DRAW`, `SPI`, `LOGIC`, `SLOW` na tela de pausa para análise de desempenho.
+- Confirmação de exclusão antes de executar `RESET DATA`.
+- Testes hospedados reproduzíveis em `tests/`.
+
+### Changed
+
+- Renderização limitada a aproximadamente 24 quadros visuais por segundo, com relógio de lógica separado.
+- Processamento do Dabble preservado independentemente do desenho do display.
+- Mensagens de eventos durante gameplay desabilitadas por padrão.
+- Geração de partículas otimizada dentro do limite de 80 elementos.
+- Escrita NVS de fim de partida diferida para depois da apresentação do resultado ou antes de sair dessa tela.
+- Intervalo de aproximadamente 1.100 ms entre chefes consecutivos, evitando sobreposição após saltos de nível.
+- Namespace de NVS `shooter` preservado; vitória da campanha de 20 níveis mantida em campo separado de conclusão da campanha de 10 níveis.
+- Identificação visual `v4.0.0` no menu inicial.
+
+### Fixed
+
+- Correções de const-correctness na configuração dos cenários.
+- Joystick sem atraso artificial, eixo Y adequado, zona morta ±1, D-pad prioritário e velocidade 6.0.
+- Normalização das diagonais e proteção de 700 ms após dano.
+- Contabilização única de Game Over; ausência de falso novo recorde em empates.
+- Correções de menu para impedir confirmações duplicadas entre telas.
+- Boss final da campanha concluído apenas após a derrota do chefe correto.
+- Desbloqueios e estatísticas anteriores validados durante leitura da NVS.
+- Nomes visuais de skins conforme correção aprovada na v3, sem alterar índices salvos.
+- Correções de disparos, limites dos mísseis e colisões de laser para impedir dano repetido no mesmo alvo.
+
+### Verification
+
+- Testes de sintaxe e comportamento executados previamente com substitutos locais das APIs C++/Arduino.
+- Melhorias antitravamento **testadas e aprovadas pelo autor na ESP32-S3 física** antes da preparação deste pacote.
+- Nenhuma alteração de lógica realizada ao promover o firmware de teste aprovado para esta versão de lançamento.
+
+---
+
 Todas as mudanças relevantes do projeto são registradas neste arquivo.
 
 ## [3.0.0] - 2026-10-08
