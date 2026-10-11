@@ -1,5 +1,22 @@
 # Changelog
 
+## [5.0.0] - 2026-10-10
+
+### Added
+- Campanha com 50 níveis, dez bosses (três fases), nove inimigos e modo Endless.
+- Cinco naves, moedas, loja, seis upgrades, 15 conquistas, dash e estatísticas.
+- Cinco cenários, seis armas e novos efeitos gráficos.
+
+### Fixed
+- Corrigido o inimigo blindado que ignorava disparos comuns.
+- Corrigida a recompensa do boss final que ficava inacessível após a vitória.
+- Documentada a correção local da biblioteca DabbleESP32 contra resets heap_caps_free, aplicada e confirmada eficaz em teste na ESP32-S3 pelo autor.
+
+### Verification
+- Campanha 50 níveis, dez bosses × três fases, 25 minutos de Endless em simulação.
+- 252.788 verificações automatizadas de gameplay/lógica/memória com mocks; não equivalem a teste de SPI/BLE físico.
+- Backtrace de ELF identificou a liberação inválida na DabbleESP32; o patch de biblioteca é externo ao firmware.
+- Consulte docs/DABBLE_BLE_RESET.md e docs/DEEP_GAMEPLAY_TESTS_V5.md.
 ## [4.0.0] - 2026-10-08
 
 ### Added

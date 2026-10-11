@@ -1,14 +1,16 @@
-# Instalação — SPACE SHOOTER v4.0.0
+# Instalação — SPACE SHOOTER v5.0.0
 
-1. Instale o core Arduino-ESP32 e selecione a placa ESP32-S3 N16R8 correspondente.
-2. Instale as bibliotecas **TFT_eSPI** e **DabbleESP32**. `Preferences` integra o core ESP32.
-3. Configure a TFT_eSPI com `config/TFT_eSPI/User_Setup.h` deste repositório, confirmando que esse setup está efetivamente ativo.
-4. Abra `firmware/SPACE_SHOOTER_ESP32S3/SPACE_SHOOTER_ESP32S3.ino` na Arduino IDE.
-5. Compile, grave e conecte o GamePad do Dabble ao nome BLE `ESP32-S3-GAMEPAD`.
-6. Confirme se o menu inicial mostra `v4.0.0`; teste direções, tiro, navegação, HUD e desempenho.
-7. Se for atualização da v3, **não apague a partição NVS**, para manter recorde, estatísticas e skins. A conclusão dos 20 níveis possui registro próprio.
+Hardware: ESP32-S3 N16R8, ILI9341 320×240, Dabble BLE GamePad. Veja HARDWARE.md.
 
-> **Atenção:** `RESET DATA` limpa os dados salvos de jogo depois de uma confirmação explícita. Cuidado ao testar esse menu.
+1. Instale Arduino-ESP32, TFT_eSPI e DabbleESP32.
+2. **ATENÇÃO — bug de reset BLE**: a biblioteca DabbleESP32 pode provocar `assert failed: heap_caps_free`. Corrija sua instalação usando [DABBLE_BLE_RESET.md](DABBLE_BLE_RESET.md) **antes** da compilação. Atualizar a biblioteca pode remover o patch.
+3. Ative o arquivo `config/TFT_eSPI/User_Setup.h` na TFT_eSPI.
+4. Abra `firmware/SPACE_SHOOTER_ESP32S3/SPACE_SHOOTER_ESP32S3.ino`, selecione a ESP32-S3 e PSRAM adequada, compile e grave.
+5. Abra Monitor Serial em 115200 baud, conecte GamePad no `ESP32-S3-GAMEPAD` e teste direção, disparos, dash, menus, bosses e loja.
+6. Preserve a NVS se quiser manter recordes, skins e progresso da v4.
 
-Para ver as métricas de desempenho, pausar durante o jogo e consultar `docs/PERFORMANCE_V4.md`.
-Para validar o lançamento, use `docs/TEST_PLAN_V4.md`.
+Script Windows: feche Arduino IDE, baixe `tools/CORRIGIR-DABBLE-ESP32S3.ps1` para Downloads, abra a pasta no Explorer, digite `powershell` na barra de endereços e execute:
+```powershell
+powershell -ExecutionPolicy Bypass -File .\CORRIGIR-DABBLE-ESP32S3.ps1
+```
+O script cria backup e modifica apenas `DabbleESP32.cpp`. Reabra o Arduino IDE e **recompile**. Mais detalhes no guia BLE.

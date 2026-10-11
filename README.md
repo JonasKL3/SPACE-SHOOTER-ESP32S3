@@ -1,67 +1,40 @@
 # SPACE-SHOOTER-ESP32S3
 
-Jogo **SPACE SHOOTER** para **ESP32-S3 N16R8**, tela TFT **ILI9341 2,8″ 320×240** e controle Bluetooth Low Energy pelo aplicativo **Dabble GamePad**. O controlador XPT2046 está fisicamente disponível, mas o toque não é utilizado no jogo.
+**SPACE SHOOTER v5.0.0** para ESP32-S3 N16R8, TFT ILI9341 2,8″ (320×240) e Dabble BLE GamePad. O toque XPT2046 não é usado.
 
-## Versão atual — v4.0.0
+## Novidades da v5.0.0
 
-Esta é a versão de lançamento que substitui a v3.0.0 na branch `main` após os testes realizados pelo autor no hardware. O firmware é **idêntico** ao candidato `v4.0.0-ANTI-TRAVAMENTO-TESTE` aprovado na ESP32-S3.
+- Campanha de **50 níveis**, **10 bosses** de três fases e modo Endless.
+- **9 tipos de inimigos**, 6 armas e 5 cenários.
+- **5 naves**, moedas e loja com **6 upgrades persistentes**.
+- **15 conquistas**, dash (TRIANGLE), estatísticas e transições pixel art.
+- Melhorias de desempenho herdadas da v4 e correções adicionais no inimigo blindado e na recompensa do boss final.
 
-### Novidades
+## ⚠️ Correção essencial — DabbleESP32 e reinicializações
 
-- **Campanha** de 20 níveis (600 pontos por avanço) e modo **Endless**.
-- **Cinco tipos de boss**: Sentinel, Hydra, Prime, Devourer e Omega. A campanha enfrenta quatro bosses (níveis 5, 10, 15 e 20); Omega entra no ciclo do Endless no nível 25.
-- **Seis armas**: Padrão, Duplo, Triplo, Spread, Laser perfurante e Míssil teleguiado.
-- **Cinco cenários**: Espaço, Nebulosa, Asteroides, Tempestade e Caos.
-- Power-ups, escudo, vida extra, combos, barra de vida dos bosses e estatísticas persistentes.
-- Quatro skins; progresso e recordes salvos na NVS, preservando os dados da versão anterior.
+Foi reproduzido na ESP32-S3 um reset aleatório com `assert failed: heap_caps_free`. O backtrace decodificado apontou para `DabbleClass::freeMemoryAllocated()` em `DabbleESP32.cpp:517`. A implementação pública aloca um vetor de ponteiros sem inicializá-los e pode tentar liberá-los após receber um quadro BLE incompleto. **O autor aplicou o patch e confirmou que os resets observados pararam.** Isso não exclui outros tipos de reset.
 
-### Estabilidade e desempenho
+**O firmware sozinho não contém essa correção: ela precisa ser aplicada na biblioteca DabbleESP32 instalada no computador.** Siga obrigatoriamente o guia [docs/DABBLE_BLE_RESET.md](docs/DABBLE_BLE_RESET.md) nas instalações afetadas, especialmente após reinstalar ou atualizar a biblioteca. Script de correção com backup: [tools/CORRIGIR-DABBLE-ESP32S3.ps1](tools/CORRIGIR-DABBLE-ESP32S3.ps1).
 
-- Desenho limitado a uma tentativa de quadro a cada **42 ms** (~24 FPS visuais), enquanto a leitura do Dabble continua separada.
-- Ajustes nas partículas, desativação de logs de eventos em tempo crítico, intervalo de transição entre bosses e escrita NVS adiada para o resultado da partida.
-- **Diagnóstico na tela de pausa**: `DRAW`, `SPI`, `LOGIC` e `SLOW`. Consulte `docs/PERFORMANCE_V4.md`.
-- Joystick analógico proporcional, D-pad prioritário, movimento máximo de 6.0 e diagonais normalizadas.
-- Proteção contra dano múltiplo em sequência; prevenção de dano repetido pelo mesmo laser; correções de menus, recorde e estado de vitória.
-- Identificação `v4.0.0` na tela inicial.
+## Instalação
 
-> **Observação sobre as skins:** o menu apresenta os rótulos visuais `VERDE`, `DOURADA`, `CIANO`, `ROXA`, conforme ajuste solicitado e testado na versão anterior. Os índices, cores, requisitos e dados salvos mantêm os mapeamentos internos originais. Consulte `docs/CONTROLS.md`.
+1. Instale core Arduino-ESP32, TFT_eSPI e DabbleESP32.
+2. Corrija a DabbleESP32 conforme [guia BLE](docs/DABBLE_BLE_RESET.md).
+3. Configure a TFT_eSPI usando [config/TFT_eSPI/User_Setup.h](config/TFT_eSPI/User_Setup.h).
+4. Abra [firmware/SPACE_SHOOTER_ESP32S3/SPACE_SHOOTER_ESP32S3.ino](firmware/SPACE_SHOOTER_ESP32S3/SPACE_SHOOTER_ESP32S3.ino), compile e grave na ESP32-S3 N16R8.
+5. Conecte o módulo GamePad do Dabble ao dispositivo BLE `ESP32-S3-GAMEPAD`.
 
-## Como instalar
+Manual: [docs/INSTALLATION.md](docs/INSTALLATION.md).
 
-1. Confira `docs/HARDWARE.md` e a pinagem do display.
-2. Configure TFT_eSPI com `config/TFT_eSPI/User_Setup.h` e instale a biblioteca `DabbleESP32`.
-3. Abra `firmware/SPACE_SHOOTER_ESP32S3/SPACE_SHOOTER_ESP32S3.ino` na Arduino IDE com o core ESP32.
-4. Compile e grave na ESP32-S3 N16R8. Abra o módulo GamePad do Dabble e conecte-se ao dispositivo BLE `ESP32-S3-GAMEPAD`.
+## Controles e progresso
 
-Instruções detalhadas: `docs/INSTALLATION.md`.
+D-pad/analógico movimentam; CROSS/CIRCLE atiram; TRIANGLE dá dash; START pausa; SELECT volta. Na loja, selecione naves/upgrades e confirme com CROSS. Skins do menu: VERDE, DOURADA, CIANO e ROXA (índices internos preservados). O namespace NVS `shooter` mantém score e progresso da v4.
 
-## Controles
+## Documentação
 
-- D-pad ou joystick analógico: mover e navegar.
-- CROSS/CIRCLE: atirar durante a partida; CROSS confirma menus.
-- START: pausar/continuar e sair da tela final.
-- SELECT: voltar/cancelar onde permitido.
-- RESET DATA: requer **confirmação explícita**; apaga recordes, estatísticas e progresso.
+- [docs/RELEASE_NOTES_V5.md](docs/RELEASE_NOTES_V5.md) — novidades e correções.
+- [docs/DEEP_GAMEPLAY_TESTS_V5.md](docs/DEEP_GAMEPLAY_TESTS_V5.md) — alcance e limites das simulações.
+- [docs/DABBLE_BLE_RESET.md](docs/DABBLE_BLE_RESET.md) — diagnóstico do ELF, correção e reversão.
+- [CHANGELOG.md](CHANGELOG.md) — histórico de versões.
 
-## Documentação e organização
-
-```text
-firmware/SPACE_SHOOTER_ESP32S3/    Firmware Arduino (v4.0.0)
-config/TFT_eSPI/                    Setup do ILI9341
- docs/                               Hardware, controles, instalação, performance e testes
-references/original/               Fontes recebidas das versões v1 a v4
- tests/                               Testes de lógica em C++ e simuladores locais
-licenses/                            Avisos de bibliotecas de terceiros
-README.md / CHANGELOG.md / VERSION Documentação e identificação
-SHA256SUMS.txt / FILE_LIST.txt      Integridade e inventário
-```
-
-## Histórico de releases
-
-- `v1.0.0` — primeira versão.
-- `v1.1.0` — analógico e correções de controle.
-- `v2.0.0` — menus, estatísticas, inimigos e power-ups.
-- `v3.0.0` — campanha curta, bosses e skins.
-- **`v4.0.0`** — campanha de 20 níveis, bosses especializados, novas armas/cenários e melhorias antitravamento.
-
-A `main` deve representar a versão estável mais recente; as versões antigas ficam preservadas pelas respectivas **tags e GitHub Releases**. Ao publicar a atualização, envie o **conteúdo extraído** deste pacote para a raiz do repositório, faça commit e somente então crie a tag `v4.0.0` a partir do commit atualizado.
+Tags e Releases anteriores à v5 são mantidas no GitHub. A branch `main` contém o firmware oficial mais recente.
