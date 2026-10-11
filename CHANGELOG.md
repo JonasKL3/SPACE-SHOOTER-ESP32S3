@@ -1,5 +1,14 @@
 # Changelog
 
+## v6.6.0 — Boss Rush, Mechapunk & Configurações
+
+- Novo modo Boss Rush com os 10 bosses em sequência. Bloqueado até concluir campanha ou ativar debug; desbloqueio via conquista é persistente.
+- Cinco novos modelos estruturais de naves, com desenho TFT escalável usado no menu, gameplay, loja e transições.
+- Quatro skins independentes por nave, 20 nomes e cores próprios; migração da skin global antiga sem perda de progressão.
+- Menu principal simplificado; CONTROLES, STATUS e RESET DATA dentro de CONFIGURACOES. RESET continua com confirmação.
+- Mantido hotfix Arduino `feedKonami(int k)` comprovado pelo autor na v6.5.6.
+- Regressões, Boss Rush 11min03s, campanha 10min11s, Endless 16min e fuzz 56min40s **simulados** com sanitizadores, sem erros detectados.
+
 ## [6.5.6] — Boss Intro, Bomb HUD and ESP32 Diagnostics (republicada com hotfix Arduino)
 
 - **Hotfix de compilação na Arduino IDE:** `void feedKonami(KonamiKey k)` alterado para `void feedKonami(int k)` para evitar protótipo automático antes da definição de `KonamiKey`.

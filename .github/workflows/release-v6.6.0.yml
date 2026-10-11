@@ -1,0 +1,55 @@
+name: Test and release SPACE SHOOTER v6.6.0
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release-v6.6.0.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch committed firmware and test suite
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify version and run sanitizer game tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(cat VERSION)" = '6.6.0'
+          grep -Fq '#define GAME_VERSION "v6.6.0"' firmware/SPACE_SHOOTER_ESP32S3/SPACE_SHOOTER_ESP32S3.ino
+          grep -Fq 'void feedKonami(int k)' firmware/SPACE_SHOOTER_ESP32S3/SPACE_SHOOTER_ESP32S3.ino
+          bash tests/run_all_tests.sh 2>&1 | tee V6_6_0_TEST_RESULTS.log
+      - name: Publish tag, verified source package and log
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag=v6.6.0
+          current=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" --jq '.object.sha' 2>/dev/null | grep -E '^[0-9a-f]{40}$' || true)
+          if [[ -n "$current" && "$current" != "$GITHUB_SHA" ]]; then
+            echo "Refusing to replace existing tag $tag pointing at $current"
+            exit 1
+          fi
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists, leaving it intact"
+            exit 0
+          fi
+          if [[ -z "$current" ]]; then
+            gh api -X POST "repos/${GITHUB_REPOSITORY}/git/refs" -f ref="refs/tags/${tag}" -f sha="$GITHUB_SHA" >/dev/null
+          fi
+          mkdir -p dist
+          zip=dist/SPACE-SHOOTER-ESP32S3-v6.6.0-SOURCE.zip
+          git archive --format=zip --output="$zip" "$GITHUB_SHA"
+          sha256sum "$zip" > "$zip.sha256"
+          sha256sum -c "$zip.sha256"
+          gh release create "$tag" "$zip" "$zip.sha256" V6_6_0_TEST_RESULTS.log \
+            --verify-tag --target "$GITHUB_SHA" \
+            --title 'SPACE SHOOTER v6.6.0 - Boss Rush & Mechapunk Ships' \
+            --notes-file docs/RELEASE_NOTES_V6.6.0.md --latest

@@ -1,30 +1,32 @@
-# SPACE-SHOOTER-ESP32S3
+# SPACE SHOOTER ESP32-S3 — v6.6.0
 
-**SPACE SHOOTER v6.5.6 (hotfix Arduino IDE aplicado)** — ESP32-S3 N16R8 / ILI9341 320×240 / Dabble BLE GamePad.
+Nova atualização do jogo baseada na **v6.5.6 corrigida no Arduino IDE e testada pelo autor na placa**. A v6.6.0 adiciona o Boss Rush, novos modelos de nave e seleção individual de skins, além de um menu de Configurações.
 
-## Novidades da v6.5.6
-- **Fases de 12 segundos**, preparação segura da arena e **entrada animada do boss**.
-- **Bomba SQUARE** com contador de cargas e barra de recarga.
-- Modo de debug **CROSS + SELECT enquanto PAUSED** e código Konami da loja (ambos dão moedas).
-- Diagnóstico de reset, heap/PSRAM/stack e tempos dos subsistemas pelo Serial.
-- Tratamento diferido de morte de boss e divisão de inimigos durante a verificação de colisões.
+## Novidades
 
-## Correções preservadas
-- Campanha de **50 níveis**, 10 bosses e três fases, loja, cinco pets e melhorias.
-- Colisão do inimigo blindado e tiros perfurantes, recompensa final do Void, invulnerabilidade após dano, pausa segura e prioridade do D-pad.
-- Importação dos saves da v5 para o namespace `shooter6` e **confirmação para RESET DATA**.
+- **Boss Rush:** dez bosses consecutivos, começando pelo Sentinel e terminando no Void, cada um com entrada animada. Só pode ser iniciado após vencer a campanha **ou** ativar o modo debug (X + SELECT na pausa ou Konami na loja). O desbloqueio por debug fica salvo como conquista; RESET DATA apaga esse desbloqueio.
+- **Cinco naves com silhuetas próprias:** Padrão Interceptor, Exploradora Scout, Pesada Mech, Laser Lance e Caçadora Hunter, com asa, casco, cockpit, núcleos, propulsores e armamentos distintos. O desenho é feito por primitivas TFT sem bitmaps externos.
+- **Quatro skins por nave, 20 combinações identificadas por nomes próprios.** Abra `NAVES`, escolha a nave, pressione **RIGHT** para entrar em **SKINS** e depois **CROSS** para selecionar. As opções são salvas separadamente por nave.
+- **CONFIGURACOES:** concentra CONTROLES, STATUS e RESET DATA, que mantém a confirmação em duas etapas.
 
-## Testes
-Na simulação C++17 com ASan/UBSan: **10min11s** campanha (50 níveis, 10 bosses), **16min** Endless, **56min40s** estresse aleatório (346 derrotas/reinícios). Total de **82min51s simulados**, 310.723 frames e 2.703.662 verificações, sem erro de memória detectado.
+## Modos de jogo
 
-**Validação atualizada:** o autor compilou com sucesso na Arduino IDE e testou o firmware com o hotfix `feedKonami(int k)` na ESP32-S3. A duração do teste físico não foi informada; os 82min51s descritos acima são **simulados**. A biblioteca DabbleESP32 precisa manter o patch externo contra o antigo `heap_caps_free`.
+| Modo | Disponibilidade | Como funciona |
+| --- | --- | --- |
+| Campanha | Inicial | 50 níveis e 10 bosses |
+| Endless | Inicial | Sobrevivência sem limite de níveis |
+| Boss Rush | Vitória da campanha ou debug | 10 bosses em sequência, sem ondas normais; finalização após o Void |
 
-## Instalação
-1. Verifique core Arduino-ESP32, TFT_eSPI, DabbleESP32 e a [correção da biblioteca DabbleESP32](docs/DABBLE_BLE_RESET.md).
-2. Confira a configuração [TFT_eSPI](config/TFT_eSPI/User_Setup.h).
-3. Abra [firmware/SPACE_SHOOTER_ESP32S3/SPACE_SHOOTER_ESP32S3.ino](firmware/SPACE_SHOOTER_ESP32S3/SPACE_SHOOTER_ESP32S3.ino), compile e grave na placa ESP32-S3.
-4. Abra o Monitor Serial em 115200 baud e verifique `[RESET_DIAG]`, `[HEALTH]` e `[SUBSYSTEMS]`.
+## Compatibilidade e instalação
 
-**Versões antigas:** a [branch `release/v6.0.0`](../../tree/release/v6.0.0) mantém a versão **sem debug/Konami**. As versões v1 a v5 permanecem preservadas no histórico de Releases e tags.
+- Hardware: ESP32-S3 N16R8, display ILI9341 320×240, Arduino IDE, bibliotecas TFT_eSPI e DabbleESP32.
+- O namespace **`shooter6`** da NVS permanece igual. Saves existentes (moedas, conquistas, naves, campanha e upgrades) são preservados. A skin antiga da v6.5.6 é utilizada como valor inicial das cinco novas skins se ainda não existirem chaves individuais (`skin0` … `skin4`).
+- A biblioteca DabbleESP32 instalada localmente ainda precisa ter a [correção do `heap_caps_free`](docs/DABBLE_BLE_RESET.md) quando afetada.
+- Para compilar: abra `firmware/SPACE_SHOOTER_ESP32S3/SPACE_SHOOTER_ESP32S3.ino` no Arduino IDE, verifique a configuração TFT e grave na placa.
+- Evite abrir `.ino` diretamente de uma pasta temporária do WinRAR; extraia o ZIP em uma pasta persistente.
 
-[Notas v6.5.6](docs/RELEASE_NOTES_V6.5.6.md) · [Dabble BLE](docs/DABBLE_BLE_RESET.md) · [CHANGELOG](CHANGELOG.md)
+## Verificações
+
+`bash tests/run_all_tests.sh` executa C++17, AddressSanitizer e UndefinedBehaviorSanitizer em um ambiente de **mocks de Arduino, TFT, BLE e NVS**. Inclui campanha, Endless, Boss Rush completo e estresse aleatório. **Esses testes não equivalem à compilação no core ESP32 real nem à validação de Bluetooth ou display físico.**
+
+Veja [relatório técnico](docs/RELATORIO_TESTES_v6.6.0.md) e [CHANGELOG](CHANGELOG.md).

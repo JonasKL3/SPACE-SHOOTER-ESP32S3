@@ -4,7 +4,10 @@
    ESP32-S3 N16R8 + ILI9341 2.8" + Dabble BLE
    =============================================================
 
-   NOVIDADES v6.0.0:
+   NOVIDADES v6.6.0 (base corrigida v6.5.6):
+     - BOSS RUSH: 10 bosses seguidos, desbloqueado por campanha ou debug
+     - Silhuetas MECHAPUNK distintas e skins individuais por nave
+     - Menu CONFIGURACOES com CONTROLES, STATUS e RESET
      - BOMBA funcionando (SQUARE para usar)
      - Konami Code na LOJA: cima cima baixo baixo
        esquerda direita esquerda direita + CROSS + CIRCLE
@@ -24,7 +27,7 @@
 #include <Preferences.h>
 #include <math.h>
 
-#define GAME_VERSION "v6.5.6"
+#define GAME_VERSION "v6.6.0"
 
 // =============================================================
 // DISPLAY
@@ -208,7 +211,13 @@ const int SHIP_COUNT = 5;
 // SKINS (paleta dentro de cada nave)
 // =============================================================
 const int SKIN_COUNT = 4;
-const char* skinNames[SKIN_COUNT] = { "PALETA 1", "PALETA 2", "PALETA 3", "PALETA 4" };
+const char* shipSkinNames[SHIP_COUNT][SKIN_COUNT] = {
+  {"NEON VERDE", "TITANIO", "AREIA", "NIGHT OPS"},
+  {"PLASMA AZUL", "ARCTIC", "SUNSET", "PHANTOM"},
+  {"FORJA", "VULCAN", "GUARDIAN", "DARK STEEL"},
+  {"NOVA RUBRA", "SPECTRUM", "WHITE CORE", "QUANTUM"},
+  {"VOID VIOLET", "OBSIDIAN", "GHOST", "SOLAR FLARE"}
+};
 
 // =============================================================
 // UPGRADES
@@ -468,7 +477,7 @@ const BossConfig BOSS_CFG[] = {
 // =============================================================
 // MODOS E TELAS
 // =============================================================
-enum GameMode { MODE_CAMPAIGN, MODE_ENDLESS };
+enum GameMode { MODE_CAMPAIGN, MODE_ENDLESS, MODE_BOSS_RUSH };
 
 enum GameState {
   MENU,
@@ -486,6 +495,7 @@ enum GameState {
   TRANSITION,
   BOSS_INTRO,
   RESET_CONFIRM,
+  SETTINGS,
   GAME_STATE_COUNT
 };
 
@@ -590,7 +600,8 @@ struct SaveData {
   int  highScore;
   int  gamesPlayed;
   int  totalScore;
-  int  currentSkin;
+  int  currentSkin; // legacy compatibility; mirrors the equipped ship
+  uint8_t shipSkins[SHIP_COUNT]; // per-ship palettes, same namespace
   int  unlockedSkins;
   bool campaignWon;
   int  controlMode;
@@ -610,6 +621,25 @@ struct SaveData {
 
 SaveData save;
 
+int skinForShip(int id) {
+  if (id < 0 || id >= SHIP_COUNT) return 0;
+  const int index = save.shipSkins[id];
+  return (index >= 0 && index < SKIN_COUNT) ? index : 0;
+}
+void equipShip(int id) {
+  if (id < 0 || id >= SHIP_COUNT) return;
+  save.currentShip = id;
+  save.currentSkin = skinForShip(id);
+}
+void equipSkin(int id, int skin) {
+  if (id < 0 || id >= SHIP_COUNT || skin < 0 || skin >= SKIN_COUNT) return;
+  save.shipSkins[id] = (uint8_t)skin;
+  if (save.currentShip == id) save.currentSkin = skin;
+}
+
+
+
+
 bool saveDirty = false;
 unsigned long lastSaveTime = 0;
 const unsigned long SAVE_MIN_INTERVAL = 3000;
@@ -625,6 +655,7 @@ void initSaveDefaults() {
   save.gamesPlayed = 0;
   save.totalScore = 0;
   save.currentSkin = 0;
+  for (int i = 0; i < 5; ++i) save.shipSkins[i] = 0;
   save.unlockedSkins = 0x0F;
   save.campaignWon = false;
   save.controlMode = CTRL_AUTO;
@@ -803,15 +834,17 @@ const unsigned long DABBLE_POLL_MS = 30;
 // MENU
 // =============================================================
 int menuSelection = 0;
-const int MENU_ITEMS = 9;
-const char* menuLabels[9] = {
-  "START GAME", "SKIN", "NAVES", "LOJA",
-  "PETS", "CONQUISTAS", "CONTROLE", "STATS", "RESET DATA"
+const int MENU_ITEMS = 6;
+const char* menuLabels[MENU_ITEMS] = {
+  "START GAME", "NAVES", "LOJA", "PETS", "CONQUISTAS", "CONFIGURACOES"
 };
 
 int modeSelection = 0;
-const int MODE_ITEMS = 2;
-const char* modeLabels[2] = { "CAMPANHA", "ENDLESS" };
+const int MODE_ITEMS = 3;
+const char* modeLabels[MODE_ITEMS] = { "CAMPANHA", "ENDLESS", "BOSS RUSH" };
+const int SETTINGS_ITEMS = 3;
+const char* settingsLabels[SETTINGS_ITEMS] = { "CONTROLES", "STATUS", "RESET DATA" };
+int settingsSelection = 0;
 
 int skinSelection = 0;
 int shipSelection = 0;
@@ -835,6 +868,7 @@ const int KONAMI_LEN = 10;
 
 int konamiProgress = 0;
 bool konamiActive = false;
+bool bossRushUnlocked() { return save.campaignWon || konamiActive || achvUnlocked(ACHV_KONAMI); }
 
 // =============================================================
 // POPUPS (achievement + debug)
@@ -972,6 +1006,10 @@ void loadSave() {
   save.totalTimeSec  = prefs.getULong(NVS_TOTALTIME, 0);
   save.weaponsUsedMask = prefs.getUChar(NVS_WEAPONS, 0);
   save.unlockedPets  = prefs.getInt(NVS_PETS, 0);
+  for (int i = 0; i < SHIP_COUNT; i++) {
+    char key[8]; snprintf(key, sizeof(key), "skin%d", i);
+    save.shipSkins[i] = (uint8_t)constrain(prefs.getInt(key, save.currentSkin), 0, SKIN_COUNT - 1);
+  }
 
   if (save.currentSkin < 0 || save.currentSkin >= SKIN_COUNT) save.currentSkin = 0;
   if (save.currentShip < 0 || save.currentShip >= SHIP_COUNT) save.currentShip = SHIP_STANDARD;
@@ -1016,6 +1054,7 @@ void loadSave() {
       save.currentSkin = constrain(save.currentSkin, 0, SKIN_COUNT - 1);
       save.currentShip = constrain(save.currentShip, 0, SHIP_COUNT - 1);
       save.controlMode = constrain(save.controlMode, (int)CTRL_DIGITAL, (int)CTRL_AUTO);
+      for (int i = 0; i < SHIP_COUNT; ++i) save.shipSkins[i] = (uint8_t)save.currentSkin;
     }
     prefs.end();
     if (legacyExists) {
@@ -1023,6 +1062,7 @@ void loadSave() {
       Serial.println("Migracao NVS v5 -> v6 realizada.");
     }
   }
+  equipShip(save.currentShip);
   Serial.printf("NVS: HI=%d Coins=%d Ship=%d Pets=0x%X\n",
                 save.highScore, save.coins, save.currentShip, save.unlockedPets);
 }
@@ -1033,6 +1073,10 @@ void saveAll() {
   prefs.putInt(NVS_GAMES,   save.gamesPlayed);
   prefs.putInt(NVS_TOTAL,   save.totalScore);
   prefs.putInt(NVS_SKIN,    save.currentSkin);
+  for (int i = 0; i < SHIP_COUNT; ++i) {
+    char key[8]; snprintf(key, sizeof(key), "skin%d", i);
+    prefs.putInt(key, save.shipSkins[i]);
+  }
   prefs.putInt(NVS_UNLOCK,  save.unlockedSkins);
   prefs.putBool(NVS_CAMPWON, save.campaignWon);
   prefs.putInt(NVS_CTRLMODE, save.controlMode);
@@ -1925,7 +1969,8 @@ void onBossKilled() {
   int reward = 500 + (int)boss.type * 250;
   game.score += reward;
 
-  const bool finalVictory = (game.mode == MODE_CAMPAIGN && game.level >= 50 && boss.type == BOSS_VOID);
+  const bool finalVictory = (game.mode == MODE_CAMPAIGN && game.level >= 50 && boss.type == BOSS_VOID)
+                         || (game.mode == MODE_BOSS_RUSH && boss.type == BOSS_VOID && game.bossesKilled == 9);
   if (finalVictory) {
     // A vitória bloqueia a coleta: creditar diretamente as moedas do boss final.
     for (int k = 0; k < 3; ++k) {
@@ -1953,9 +1998,102 @@ void onBossKilled() {
 
   if (finalVictory) {
     game.wonThisGame = true;
-    save.campaignWon = true;
+    if (game.mode == MODE_CAMPAIGN) save.campaignWon = true;
     onGameOver();
     game.state = GAME_OVER;
+  } else if (game.mode == MODE_BOSS_RUSH) {
+    // Exactly one boss is active; next is selected from total bosses beaten.
+    game.level = (game.bossesKilled + 1) * 5;
+    game.bombsLeft = save.upgradeLevels[UPG_START_BOMB];
+    game.bombCooldown = 0;
+    spawnBoss((BossType)game.bossesKilled);
+    game.state = BOSS_INTRO;
+    game.stateTimer = 0;
+    game.levelStartTime = millis();
+  }
+}
+
+// Five different mechanically-detailed silhouettes. The palette is stored per ship.
+// Simple primitives keep the artwork light on ESP32-S3 (no external bitmaps).
+void drawMechShip(int type, int x, int y, int sc, int skin) {
+  if (type < 0 || type >= SHIP_COUNT || sc < 1 || sc > 5) return;
+  if (skin < 0 || skin >= SKIN_COUNT) skin = 0;
+  const ShipPalette& pal = SHIPS[type].palettes[skin];
+  uint16_t body = pal.cMain, edge = pal.cLight, shadow = pal.cDark;
+  uint16_t core = (type == SHIP_LASER) ? 0x07FF : ((type == SHIP_HEAVY) ? 0xFD20 : 0xBFFF);
+  // Coordinates relative to the ship center. Each hull has its own geometry.
+  switch (type) {
+    case SHIP_STANDARD: { // Interceptor: split angular wings, triple fuselage plating
+      canvas.fillTriangle(x-18*sc,y+7*sc,x-7*sc,y-10*sc,x-4*sc,y+12*sc,shadow);
+      canvas.fillTriangle(x+18*sc,y+7*sc,x+7*sc,y-10*sc,x+4*sc,y+12*sc,shadow);
+      canvas.fillTriangle(x-17*sc,y+5*sc,x-6*sc,y-7*sc,x-7*sc,y+8*sc,body);
+      canvas.fillTriangle(x+17*sc,y+5*sc,x+6*sc,y-7*sc,x+7*sc,y+8*sc,body);
+      canvas.fillTriangle(x,y-17*sc,x-9*sc,y+10*sc,x+9*sc,y+10*sc,body);
+      canvas.fillTriangle(x,y-17*sc,x-3*sc,y+2*sc,x+3*sc,y+2*sc,edge);
+      canvas.drawLine(x-14*sc,y+6*sc,x-6*sc,y+3*sc,edge);
+      canvas.drawLine(x+14*sc,y+6*sc,x+6*sc,y+3*sc,edge);
+      break;
+    }
+    case SHIP_SCOUT: { // Fast scout: long canards, narrow needle center
+      canvas.fillTriangle(x-18*sc,y-6*sc,x-5*sc,y-3*sc,x-7*sc,y+9*sc,body);
+      canvas.fillTriangle(x+18*sc,y-6*sc,x+5*sc,y-3*sc,x+7*sc,y+9*sc,body);
+      canvas.fillTriangle(x-14*sc,y+11*sc,x-9*sc,y-5*sc,x-8*sc,y+13*sc,shadow);
+      canvas.fillTriangle(x+14*sc,y+11*sc,x+9*sc,y-5*sc,x+8*sc,y+13*sc,shadow);
+      canvas.fillTriangle(x,y-21*sc,x-5*sc,y+14*sc,x+5*sc,y+14*sc,edge);
+      canvas.fillTriangle(x,y-16*sc,x-2*sc,y+12*sc,x+2*sc,y+12*sc,body);
+      canvas.drawLine(x-17*sc,y-6*sc,x-10*sc,y-2*sc,edge);
+      canvas.drawLine(x+17*sc,y-6*sc,x+10*sc,y-2*sc,edge);
+      break;
+    }
+    case SHIP_HEAVY: { // Heavy mech: bulky hull, two armored weapon pods
+      canvas.fillRoundRect(x-11*sc,y-12*sc,22*sc,27*sc,3*sc,shadow);
+      canvas.fillRect(x-9*sc,y-10*sc,18*sc,21*sc,body);
+      canvas.fillRect(x-21*sc,y-5*sc,9*sc,20*sc,shadow);
+      canvas.fillRect(x+12*sc,y-5*sc,9*sc,20*sc,shadow);
+      canvas.fillRect(x-19*sc,y-8*sc,5*sc,17*sc,body);
+      canvas.fillRect(x+14*sc,y-8*sc,5*sc,17*sc,body);
+      canvas.fillRect(x-17*sc,y-14*sc,3*sc,12*sc,edge);
+      canvas.fillRect(x+14*sc,y-14*sc,3*sc,12*sc,edge);
+      canvas.drawLine(x-8*sc,y+6*sc,x+8*sc,y+6*sc,edge);
+      canvas.fillTriangle(x,y-19*sc,x-8*sc,y-6*sc,x+8*sc,y-6*sc,edge);
+      break;
+    }
+    case SHIP_LASER: { // Energy lance: rail guns + power conduits
+      canvas.fillTriangle(x,y-24*sc,x-7*sc,y+13*sc,x+7*sc,y+13*sc,shadow);
+      canvas.fillTriangle(x,y-22*sc,x-4*sc,y+11*sc,x+4*sc,y+11*sc,body);
+      canvas.fillRect(x-15*sc,y-9*sc,5*sc,21*sc,body);
+      canvas.fillRect(x+10*sc,y-9*sc,5*sc,21*sc,body);
+      canvas.fillRect(x-14*sc,y-19*sc,3*sc,14*sc,edge);
+      canvas.fillRect(x+11*sc,y-19*sc,3*sc,14*sc,edge);
+      canvas.drawLine(x-11*sc,y+3*sc,x-5*sc,y-5*sc,core);
+      canvas.drawLine(x+11*sc,y+3*sc,x+5*sc,y-5*sc,core);
+      canvas.fillRect(x-2*sc,y-9*sc,4*sc,17*sc,core);
+      break;
+    }
+    case SHIP_HUNTER: { // Mechapunk hunter: reverse-swept quad wing, missile pods
+      canvas.fillTriangle(x-24*sc,y+3*sc,x-4*sc,y-11*sc,x-9*sc,y+16*sc,shadow);
+      canvas.fillTriangle(x+24*sc,y+3*sc,x+4*sc,y-11*sc,x+9*sc,y+16*sc,shadow);
+      canvas.fillTriangle(x-21*sc,y+2*sc,x-9*sc,y-7*sc,x-13*sc,y+11*sc,body);
+      canvas.fillTriangle(x+21*sc,y+2*sc,x+9*sc,y-7*sc,x+13*sc,y+11*sc,body);
+      canvas.fillTriangle(x-15*sc,y-11*sc,x-5*sc,y-5*sc,x-7*sc,y+8*sc,edge);
+      canvas.fillTriangle(x+15*sc,y-11*sc,x+5*sc,y-5*sc,x+7*sc,y+8*sc,edge);
+      canvas.fillTriangle(x,y-18*sc,x-8*sc,y+13*sc,x+8*sc,y+13*sc,body);
+      canvas.fillRect(x-18*sc,y+8*sc,4*sc,7*sc,edge);
+      canvas.fillRect(x+14*sc,y+8*sc,4*sc,7*sc,edge);
+      canvas.drawLine(x-20*sc,y+2*sc,x-10*sc,y+4*sc,edge);
+      canvas.drawLine(x+20*sc,y+2*sc,x+10*sc,y+4*sc,edge);
+      break;
+    }
+  }
+  // Shared cockpit, reactive reactor core, rivets and dual engine glow.
+  canvas.fillCircle(x,y-3*sc,3*sc,0x0010);
+  canvas.fillCircle(x,y-3*sc,2*sc,core);
+  canvas.drawPixel(x,y-4*sc,0xFFFF);
+  canvas.drawPixel(x-5*sc,y+8*sc,edge);
+  canvas.drawPixel(x+5*sc,y+8*sc,edge);
+  if ((millis()/100)%2 == 0) {
+    canvas.fillTriangle(x-6*sc,y+11*sc,x-2*sc,y+11*sc,x-4*sc,y+18*sc,0xFC00);
+    canvas.fillTriangle(x+2*sc,y+11*sc,x+6*sc,y+11*sc,x+4*sc,y+18*sc,0xFFE0);
   }
 }
 
@@ -1968,15 +2106,7 @@ void drawPlayer() {
 
   if (game.invulnerable && (millis() / 60) % 2 == 0) return;
 
-  const ShipInfo& ship = SHIPS[save.currentShip];
-  int sk = save.currentSkin;
-  if (sk < 0 || sk >= SKIN_COUNT) sk = 0;
-  const ShipPalette& pal = ship.palettes[sk];
-  uint16_t cMain = pal.cMain;
-  uint16_t cLight = pal.cLight;
-  uint16_t cDark = pal.cDark;
-
-  if (game.shieldTimer > 0) cMain = C_POWERUP;
+  const int sk = skinForShip(save.currentShip);
 
   if (game.dashTimer > 0) {
     for (int i = 1; i <= 3; i++) {
@@ -1987,23 +2117,7 @@ void drawPlayer() {
     }
   }
 
-  canvas.fillTriangle(x, y - 10, x - 9, y + 9, x + 9, y + 9, 0x0000);
-  canvas.fillTriangle(x - 5, y - 2, x - 14, y + 6, x - 5, y + 8, cDark);
-  canvas.fillTriangle(x + 5, y - 2, x + 14, y + 6, x + 5, y + 8, cDark);
-  canvas.drawPixel(x - 13, y + 5, cLight);
-  canvas.drawPixel(x + 13, y + 5, cLight);
-  canvas.fillTriangle(x, y - 13, x - 10, y + 8, x + 10, y + 8, cMain);
-  canvas.fillTriangle(x, y - 13, x - 5, y - 2, x + 5, y - 2, cLight);
-  canvas.fillCircle(x, y - 3, 3, 0x001F);
-  canvas.fillCircle(x, y - 3, 2, 0x07FF);
-  canvas.drawPixel(x, y - 4, 0xFFFF);
-  canvas.drawPixel(x - 7, y + 3, cLight);
-  canvas.drawPixel(x + 7, y + 3, cLight);
-
-  int flameLen = 10 + ((millis() / 50) % 3) * 2;
-  canvas.fillTriangle(x - 4, y + 8, x + 4, y + 8, x, y + 8 + flameLen, 0xFC00);
-  canvas.fillTriangle(x - 2, y + 8, x + 2, y + 8, x, y + 6 + flameLen, 0xFFE0);
-  canvas.fillTriangle(x - 1, y + 8, x + 1, y + 8, x, y + 4 + flameLen, 0xFFFF);
+  drawMechShip(save.currentShip, x, y, 1, sk);
 
   if (game.shieldTimer > 0) {
     uint16_t sCol = (game.shieldTimer % 10 < 5) ? C_POWERUP : 0x07FF;
@@ -2359,6 +2473,8 @@ void drawUI() {
   canvas.setCursor(SCREEN_W / 2 - 40, 6);
   if (game.mode == MODE_CAMPAIGN) {
     canvas.printf("CAMP %d/50", game.level);
+  } else if (game.mode == MODE_BOSS_RUSH) {
+    canvas.printf("RUSH %d/10", game.bossesKilled + (boss.active ? 1 : 0));
   } else {
     canvas.printf("ENDLESS %d", game.level);
   }
@@ -3053,6 +3169,8 @@ void updateTimers() {
     game.weapon = SHIPS[save.currentShip].startWeapon;
   if (game.bombCooldown > 0) game.bombCooldown--;
 
+  // Boss Rush has no time-based levels or regular enemy spawns.
+  if (game.mode == MODE_BOSS_RUSH) return;
   const unsigned long now = millis();
   const int maxLevel = (game.mode == MODE_CAMPAIGN) ? 50 : 999;
   if (!boss.active && !game.bossPending && game.level < maxLevel &&
@@ -3123,29 +3241,9 @@ void drawPixelArtShipFullscreen(int shipType, int frame) {
   cy += offset / 3;
 
   if (shipType < 0 || shipType >= SHIP_COUNT) shipType = 0;
-  const ShipInfo& ship = SHIPS[shipType];
-  int sk = save.currentSkin;
-  if (sk < 0 || sk >= SKIN_COUNT) sk = 0;
-  const ShipPalette& pal = ship.palettes[sk];
+  const int sk = skinForShip(shipType);
 
-  canvas.fillTriangle(cx + 4, cy - 40, cx - 40, cy + 50, cx + 40, cy + 50, 0x0000);
-  canvas.fillTriangle(cx - 20, cy - 10, cx - 55, cy + 30, cx - 20, cy + 40, pal.cDark);
-  canvas.fillTriangle(cx + 20, cy - 10, cx + 55, cy + 30, cx + 20, cy + 40, pal.cDark);
-  canvas.fillTriangle(cx, cy - 60, cx - 40, cy + 40, cx + 40, cy + 40, pal.cMain);
-  canvas.fillTriangle(cx, cy - 60, cx - 20, cy - 10, cx + 20, cy - 10, pal.cLight);
-  canvas.fillCircle(cx, cy - 15, 12, 0x001F);
-  canvas.fillCircle(cx, cy - 15, 8, 0x07FF);
-  canvas.fillCircle(cx, cy - 15, 4, 0xFFFF);
-  canvas.drawPixel(cx - 3, cy - 20, 0xFFFF);
-  canvas.fillRect(cx - 30, cy + 15, 8, 12, pal.cLight);
-  canvas.fillRect(cx + 22, cy + 15, 8, 12, pal.cLight);
-  canvas.drawPixel(cx - 40, cy + 20, 0xFFFF);
-  canvas.drawPixel(cx + 40, cy + 20, 0xFFFF);
-
-  int flameLen = 25 + ((frame / 4) % 3) * 8;
-  canvas.fillTriangle(cx - 15, cy + 40, cx + 15, cy + 40, cx, cy + 40 + flameLen, 0xFC00);
-  canvas.fillTriangle(cx - 8, cy + 40, cx + 8, cy + 40, cx, cy + 35 + flameLen, 0xFFE0);
-  canvas.fillTriangle(cx - 4, cy + 40, cx + 4, cy + 40, cx, cy + 30 + flameLen, 0xFFFF);
+  drawMechShip(shipType, cx, cy, 3, sk);
 
   for (int i = 0; i < 12; i++) {
     int sx = random(0, SCREEN_W);
@@ -3384,22 +3482,8 @@ void render() {
     }
 
     int cx = 255, cy = 130;
-    const ShipInfo& ship = SHIPS[save.currentShip];
-    int sk = save.currentSkin;
-    if (sk < 0 || sk >= SKIN_COUNT) sk = 0;
-    const ShipPalette& pal = ship.palettes[sk];
 
-    canvas.fillTriangle(cx + 4, cy - 30, cx - 30, cy + 40, cx + 30, cy + 40, 0x0000);
-    canvas.fillTriangle(cx - 15, cy - 5, cx - 40, cy + 25, cx - 15, cy + 30, pal.cDark);
-    canvas.fillTriangle(cx + 15, cy - 5, cx + 40, cy + 25, cx + 15, cy + 30, pal.cDark);
-    canvas.fillTriangle(cx, cy - 50, cx - 30, cy + 30, cx + 30, cy + 30, pal.cMain);
-    canvas.fillTriangle(cx, cy - 50, cx - 15, cy - 5, cx + 15, cy - 5, pal.cLight);
-    canvas.fillCircle(cx, cy - 12, 8, 0x001F);
-    canvas.fillCircle(cx, cy - 12, 5, 0x07FF);
-    canvas.fillCircle(cx, cy - 12, 2, 0xFFFF);
-    int flameLen = 18 + ((millis() / 50) % 3) * 5;
-    canvas.fillTriangle(cx - 10, cy + 30, cx + 10, cy + 30, cx, cy + 30 + flameLen, 0xFC00);
-    canvas.fillTriangle(cx - 5, cy + 30, cx + 5, cy + 30, cx, cy + 25 + flameLen, 0xFFE0);
+    drawMechShip(save.currentShip, cx, cy, 2, skinForShip(save.currentShip));
 
     canvas.setTextSize(3);
     canvas.setTextColor(0x0010, C_BG);
@@ -3419,7 +3503,7 @@ void render() {
     canvas.printf("$ %d", save.coins);
 
     for (int i = 0; i < MENU_ITEMS; i++) {
-      int y = 100 + i * 14;
+      int y = 107 + i * 18;
       bool sel = (i == menuSelection);
 
       if (sel) {
@@ -3436,11 +3520,6 @@ void render() {
       canvas.setCursor(34, y); canvas.print(menuLabels[i]);
 
       if (i == 1) {
-        canvas.setCursor(115, y);
-        canvas.setTextColor(0x8410, sel ? C_HIGHLIGHT : C_BG);
-        canvas.printf("%s", skinNames[save.currentSkin]);
-      }
-      if (i == 2) {
         canvas.setCursor(115, y);
         canvas.setTextColor(0x8410, sel ? C_HIGHLIGHT : C_BG);
         canvas.printf("%s", SHIPS[save.currentShip].name);
@@ -3462,7 +3541,7 @@ void render() {
     canvas.setCursor(70, 50); canvas.print("MODO DE JOGO");
 
     for (int i = 0; i < MODE_ITEMS; i++) {
-      int y = 100 + i * 40;
+      int y = 89 + i * 36;
       bool sel = (i == modeSelection);
       if (sel) {
         if ((millis() / 300) % 2 == 0) {
@@ -3477,21 +3556,29 @@ void render() {
         canvas.setTextColor(0xBDF7, C_BG);
       }
       canvas.setTextSize(2);
+      if (i == 2 && !bossRushUnlocked()) canvas.setTextColor(C_DIM, C_BG);
       canvas.setCursor(85, y); canvas.print(modeLabels[i]);
+      if (i == 2 && !bossRushUnlocked()) {
+        canvas.setTextSize(1);
+        canvas.setCursor(90, y + 18); canvas.print("BLOQUEADO");
+      }
     }
 
     canvas.setTextSize(1);
     canvas.setTextColor(C_DIM, C_BG);
-    canvas.setCursor(20, 200); canvas.print("CAMPANHA = 50 niveis + 10 bosses");
+    canvas.setCursor(18, 207);
+    canvas.print(bossRushUnlocked() ? "RUSH: 10 BOSSES SEGUIDOS" : "RUSH: vença CAMPANHA ou use DEBUG");
   }
 
   // ===== SKIN SELECT =====
   if (game.state == SKIN_SELECT) {
     canvas.setTextColor(C_PLAYER, C_BG);
     canvas.setTextSize(2);
-    canvas.setCursor(85, 15); canvas.print("PALETA");
+    canvas.setCursor(30, 15); canvas.print("SKINS POR NAVE");
+    canvas.setTextSize(1); canvas.setTextColor(C_DIM, C_BG);
+    canvas.setCursor(40, 38); canvas.print(SHIPS[shipSelection].name);
 
-    const ShipInfo& ship = SHIPS[save.currentShip];
+    const ShipInfo& ship = SHIPS[shipSelection];
 
     for (int i = 0; i < SKIN_COUNT; i++) {
       int y = 55 + i * 38;
@@ -3499,9 +3586,7 @@ void render() {
       const ShipPalette& pal = ship.palettes[i];
 
       int px = 40, py = y + 12;
-      canvas.fillTriangle(px, py - 10, px - 8, py + 8, px + 8, py + 8, pal.cMain);
-      canvas.fillTriangle(px, py - 10, px - 4, py - 2, px + 4, py - 2, pal.cLight);
-      canvas.fillCircle(px, py - 2, 2, 0xFFFF);
+      drawMechShip(shipSelection, px, py, 1, i);
 
       if (sel) {
         if ((millis() / 300) % 2 == 0) {
@@ -3516,10 +3601,10 @@ void render() {
       canvas.setTextSize(2);
       canvas.setTextColor(0xFFFF, C_BG);
       canvas.setCursor(75, y);
-      canvas.print(skinNames[i]);
+      canvas.print(shipSkinNames[shipSelection][i]);
 
       canvas.setTextSize(1);
-      if (i == save.currentSkin) {
+      if (i == skinForShip(shipSelection)) {
         canvas.setTextColor(0x07E0, C_BG);
         canvas.setCursor(75, y + 18);
         canvas.print("<< ATIVA >>");
@@ -3549,14 +3634,9 @@ void render() {
       bool sel = (i == shipSelection);
       bool unl = shipUnlocked(i);
       const ShipInfo& sh = SHIPS[i];
-      const ShipPalette& pal = sh.palettes[0];
+      drawMechShip(i, 41, y + 11, 1, skinForShip(i));
 
-      int px = 40, py = y + 16;
-      canvas.fillTriangle(px, py - 12, px - 10, py + 10, px + 10, py + 10, pal.cMain);
-      canvas.fillTriangle(px, py - 12, px - 5, py - 2, px + 5, py - 2, pal.cLight);
-      canvas.fillCircle(px, py - 3, 2, 0xFFFF);
-
-      if (sel) canvas.drawRect(60, y - 3, 240, 32, unl ? C_BULLET : 0x4000);
+      if (sel) canvas.drawRect(60, y - 3, 138, 32, unl ? C_BULLET : 0x4000);
 
       canvas.setTextSize(1);
       canvas.setTextColor(unl ? 0xFFFF : 0x4208, C_BG);
@@ -3565,22 +3645,33 @@ void render() {
 
       canvas.setTextColor(0x8410, C_BG);
       canvas.setCursor(70, y + 12);
-      canvas.printf("%s | %s", sh.desc, WEAPONS[(int)sh.startWeapon].name);
+      canvas.printf("%s", WEAPONS[(int)sh.startWeapon].name);
 
       if (i == save.currentShip) {
         canvas.setTextColor(0x07E0, C_BG);
-        canvas.setCursor(200, y);
-        canvas.print("<< ATIVA >>");
+        canvas.setCursor(151, y + 12);
+        canvas.print("ATIVA");
       }
       if (!unl) {
         canvas.setTextColor(C_COIN, C_BG);
-        canvas.setCursor(200, y);
+        canvas.setCursor(151, y + 12);
         canvas.printf("$%d", sh.cost);
       }
     }
 
     canvas.setTextColor(C_DIM, C_BG);
-    canvas.setCursor(60, 215); canvas.print("CROSS=OK  SELECT=voltar");
+    canvas.setCursor(10, 215); canvas.print("CROSS=NAVE RIGHT=SKINS SELECT=MENU");
+    // Preview panel uses the selected ship's saved palette, not the global legacy palette.
+    const int sk = skinForShip(shipSelection);
+    const ShipPalette& cp = SHIPS[shipSelection].palettes[sk];
+    canvas.drawRect(201, 28, 111, 171, cp.cMain);
+    drawMechShip(shipSelection, 256, 88, 2, sk);
+    canvas.setTextColor(cp.cLight, C_BG);
+    canvas.setTextSize(1);
+    canvas.setCursor(209, 131); canvas.print("SKIN");
+    canvas.setCursor(209, 145); canvas.print(shipSkinNames[shipSelection][sk]);
+    canvas.setCursor(209, 166);
+    canvas.print(shipUnlocked(shipSelection) ? "RIGHT: MUDAR" : "BLOQUEADA");
   }
 
   // ===== SHOP =====
@@ -3612,11 +3703,7 @@ void render() {
         bool sel = (i == shopIndex);
         bool unl = shipUnlocked(i);
         const ShipInfo& sh = SHIPS[i];
-        const ShipPalette& pal = sh.palettes[0];
-
-        int px = 30, py = y + 13;
-        canvas.fillTriangle(px, py - 10, px - 8, py + 8, px + 8, py + 8, pal.cMain);
-        canvas.fillTriangle(px, py - 10, px - 4, py - 1, px + 4, py - 1, pal.cLight);
+        drawMechShip(i, 30, y + 12, 1, skinForShip(i));
 
         if (sel) {
           canvas.fillRect(48, y - 2, SCREEN_W - 55, 26, C_HIGHLIGHT);
@@ -3848,6 +3935,24 @@ void render() {
 
     canvas.setTextColor(C_DIM, C_BG);
     canvas.setCursor(60, 222); canvas.print("CROSS=OK  SELECT=voltar");
+  }
+
+  // ===== CONFIGURACOES =====
+  if (game.state == SETTINGS) {
+    canvas.setTextColor(C_PLAYER, C_BG);
+    canvas.setTextSize(2); canvas.setCursor(60, 22); canvas.print("CONFIGURACOES");
+    for (int i = 0; i < SETTINGS_ITEMS; i++) {
+      int y = 85 + i * 39;
+      bool sel = (i == settingsSelection);
+      if (sel) {
+        canvas.fillRect(35, y - 5, 250, 25, C_HIGHLIGHT);
+        canvas.drawRect(35, y - 5, 250, 25, C_BULLET);
+      }
+      canvas.setTextColor(sel ? C_BULLET : C_UI, sel ? C_HIGHLIGHT : C_BG);
+      canvas.setTextSize(2); canvas.setCursor(49, y); canvas.print(settingsLabels[i]);
+    }
+    canvas.setTextSize(1); canvas.setTextColor(C_DIM, C_BG);
+    canvas.setCursor(48, 219); canvas.print("CROSS=ABRIR  SELECT=MENU");
   }
 
   // ===== STATS =====
@@ -4151,13 +4256,14 @@ void loop() {
   lastStart = input.start;
 
   if (input.select && !lastSelect) {
-    if (game.state == GAME_OVER ||
-        game.state == PAUSED || game.state == SKIN_SELECT ||
-        game.state == MODE_SELECT || game.state == CTRL_SELECT ||
-        game.state == SHOP || game.state == SHIP_SELECT ||
-        game.state == PET_SHOP ||
-        game.state == ACHV_SCREEN || game.state == STATS ||
-        game.state == RESET_CONFIRM) {
+    if (game.state == SKIN_SELECT) {
+      game.state = SHIP_SELECT;
+    } else if (game.state == CTRL_SELECT || game.state == STATS || game.state == RESET_CONFIRM) {
+      game.state = SETTINGS;
+    } else if (game.state == GAME_OVER || game.state == PAUSED ||
+               game.state == MODE_SELECT || game.state == SETTINGS ||
+               game.state == SHOP || game.state == SHIP_SELECT ||
+               game.state == PET_SHOP || game.state == ACHV_SCREEN) {
       game.state = MENU;
       saveAll();
     }
@@ -4182,14 +4288,11 @@ void loop() {
     if ((input.cross || input.start) && !lC) {
       switch (menuSelection) {
         case 0: modeSelection = 0; game.state = MODE_SELECT; break;
-        case 1: skinSelection = save.currentSkin; game.state = SKIN_SELECT; break;
-        case 2: shipSelection = save.currentShip; game.state = SHIP_SELECT; break;
-        case 3: shopTab = 0; shopIndex = 0; shopScroll = 0; game.state = SHOP; break;
-        case 4: petSelection = 0; game.state = PET_SHOP; break;
-        case 5: shopScroll = 0; game.state = ACHV_SCREEN; break;
-        case 6: ctrlSelection = 0; game.state = CTRL_SELECT; break;
-        case 7: game.state = STATS; break;
-        case 8: resetConfirmReleased = false; game.state = RESET_CONFIRM; break;
+        case 1: shipSelection = save.currentShip; game.state = SHIP_SELECT; break;
+        case 2: shopTab = 0; shopIndex = 0; shopScroll = 0; game.state = SHOP; break;
+        case 3: petSelection = 0; game.state = PET_SHOP; break;
+        case 4: shopScroll = 0; game.state = ACHV_SCREEN; break;
+        case 5: settingsSelection = 0; game.state = SETTINGS; break;
       }
     }
     lU = input.up; lD = input.down; lC = input.cross || input.start;
@@ -4203,7 +4306,7 @@ void loop() {
     if (resetConfirmReleased && (input.cross || input.start)) {
       resetSave();
       resetConfirmReleased = false;
-      game.state = MENU;
+      game.state = SETTINGS;
     }
   }
 
@@ -4213,10 +4316,16 @@ void loop() {
     if (input.up   && !lU) { modeSelection--; if (modeSelection < 0) modeSelection = MODE_ITEMS - 1; }
     if (input.down && !lD) { modeSelection++; if (modeSelection >= MODE_ITEMS) modeSelection = 0; }
     if ((input.cross || input.start) && !lC) {
-      game.mode = (modeSelection == 0) ? MODE_CAMPAIGN : MODE_ENDLESS;
-      resetGame();
-      game.state = TRANSITION;
-      game.stateTimer = 0;
+      if (modeSelection != 2 || bossRushUnlocked()) {
+        game.mode = (GameMode)modeSelection;
+        resetGame();
+        game.stateTimer = 0;
+        if (game.mode == MODE_BOSS_RUSH) {
+          game.level = 5;
+          spawnBoss(BOSS_SENTINEL);
+          game.state = BOSS_INTRO;
+        } else game.state = TRANSITION;
+      }
     }
     lU = input.up; lD = input.down; lC = input.cross || input.start;
   }
@@ -4227,21 +4336,27 @@ void loop() {
     if (input.up   && !lU) { skinSelection--; if (skinSelection < 0) skinSelection = SKIN_COUNT - 1; }
     if (input.down && !lD) { skinSelection++; if (skinSelection >= SKIN_COUNT) skinSelection = 0; }
     if ((input.cross || input.start) && !lC) {
-      save.currentSkin = skinSelection;
-      saveAll();
-      game.state = MENU;
+      if (shipUnlocked(shipSelection)) {
+        equipSkin(shipSelection, skinSelection);
+        saveAll();
+      }
+      game.state = SHIP_SELECT;
     }
     lU = input.up; lD = input.down; lC = input.cross || input.start;
   }
 
   // ===== SHIP SELECT =====
   else if (game.state == SHIP_SELECT) {
-    static bool lU = false, lD = false, lC = false;
+    static bool lU = false, lD = false, lC = false, lR = false;
     if (input.up   && !lU) { shipSelection--; if (shipSelection < 0) shipSelection = SHIP_COUNT - 1; }
     if (input.down && !lD) { shipSelection++; if (shipSelection >= SHIP_COUNT) shipSelection = 0; }
-    if ((input.cross || input.start) && !lC) {
+    if (input.right && !lR && shipUnlocked(shipSelection)) {
+      skinSelection = skinForShip(shipSelection);
+      game.state = SKIN_SELECT;
+    }
+    if ((input.cross || input.start) && !lC && game.state == SHIP_SELECT) {
       if (shipUnlocked(shipSelection)) {
-        save.currentShip = shipSelection;
+        equipShip(shipSelection);
         saveAll();
         game.state = MENU;
       } else {
@@ -4250,7 +4365,7 @@ void loop() {
         game.state = SHOP;
       }
     }
-    lU = input.up; lD = input.down; lC = input.cross || input.start;
+    lU = input.up; lD = input.down; lC = input.cross || input.start; lR = input.right;
   }
 
   // ===== SHOP =====
@@ -4283,7 +4398,7 @@ void loop() {
         if (!shipUnlocked(shopIndex) && save.coins >= SHIPS[shopIndex].cost) {
           save.coins -= SHIPS[shopIndex].cost;
           save.unlockedShips |= (1 << shopIndex);
-          save.currentShip = shopIndex;
+          equipShip(shopIndex);
           saveAll();
           checkAchievements();
         }
@@ -4323,6 +4438,19 @@ void loop() {
     if (input.up   && !lU) { shopScroll--; if (shopScroll < 0) shopScroll = 0; }
     if (input.down && !lD) { shopScroll++; if (shopScroll > ACHV_COUNT - 12) shopScroll = ACHV_COUNT - 12; if (shopScroll < 0) shopScroll = 0; }
     lU = input.up; lD = input.down;
+  }
+
+  // ===== SETTINGS =====
+  else if (game.state == SETTINGS) {
+    static bool lU = false, lD = false, lC = false;
+    if (input.up && !lU) settingsSelection = (settingsSelection + SETTINGS_ITEMS - 1) % SETTINGS_ITEMS;
+    if (input.down && !lD) settingsSelection = (settingsSelection + 1) % SETTINGS_ITEMS;
+    if ((input.cross || input.start) && !lC) {
+      if (settingsSelection == 0) { ctrlSelection = 0; game.state = CTRL_SELECT; }
+      else if (settingsSelection == 1) game.state = STATS;
+      else { resetConfirmReleased = false; game.state = RESET_CONFIRM; }
+    }
+    lU = input.up; lD = input.down; lC = input.cross || input.start;
   }
 
   // ===== CTRL =====

@@ -7,7 +7,9 @@
 #include <cstring>
 #include <climits>
 #include <cassert>
-using std::abs;
+#include <string>
+#include <unordered_map>
+using std::abs; using std::min; using std::max;
 #define TWO_PI 6.28318530717958647692f
 #define PI 3.14159265358979323846f
 #define TFT_WHITE 0xFFFF
@@ -15,7 +17,7 @@ using std::abs;
 #define TFT_YELLOW 0xFFE0
 template<typename T,typename U,typename V> T constrain(T x,U a,V b){return x<(T)a?(T)a:(x>(T)b?(T)b:x);}
 unsigned long __ms=0;
-unsigned long millis(){return __ms;} unsigned long micros(){return __ms*1000;} void delay(int){}
+unsigned long millis(){return __ms;} unsigned long micros(){return __ms*1000;} void delay(int m){__ms+=m;} void yield(){}
 long random(long a,long b){return a + (b>a? rand()%(b-a):0);}
 void randomSeed(unsigned long){}
 unsigned long esp_random(){return 1;}
@@ -27,14 +29,24 @@ struct SerialT{
  template<class...A> void printf(const char*,A...){}
 } Serial;
 struct ESPT{int getFreePsram(){return 3000000;} int getFreeHeap(){return 250000;}} ESP;
+inline std::unordered_map<std::string,long long> mockNvs;
+inline int mockNvsWrites=0;
 struct Preferences{
- void begin(const char*,bool){}
- int getInt(const char*,int d){return d;}
- bool getBool(const char*,bool d){return d;}
+ std::string ns;
+ bool readOnly=false;
+ void begin(const char*n,bool ro){ns=n;readOnly=ro;}
+ bool isKey(const char*k){return mockNvs.count(ns+":"+k)!=0;}
+ int getInt(const char*k,int d){auto i=mockNvs.find(ns+":"+k);return i!=mockNvs.end()? (int)i->second:d;}
+ bool getBool(const char*k,bool d){return getInt(k,d?1:0)!=0;}
+ unsigned long getULong(const char*k,unsigned long d){auto i=mockNvs.find(ns+":"+k);return i!=mockNvs.end()?(unsigned long)i->second:d;}
+ uint8_t getUChar(const char*k,uint8_t d){return (uint8_t)getInt(k,d);}
  void end(){}
- void putInt(const char*,int){}
- void putBool(const char*,bool){}
+ void putInt(const char*k,int v){if(readOnly)abort();mockNvs[ns+":"+k]=v;mockNvsWrites++;}
+ void putBool(const char*k,bool v){putInt(k,v?1:0);}
+ void putULong(const char*k,unsigned long v){if(readOnly)abort();mockNvs[ns+":"+k]=v;mockNvsWrites++;}
+ void putUChar(const char*k,uint8_t v){putInt(k,v);}
 };
+
 struct GamePadT{
  bool up=false,down=false,left=false,right=false,cross=false,circle=false,triangle=false,square=false,start=false,select=false;
  int ax=0,ay=0;
