@@ -38,9 +38,10 @@ jobs:
 
             echo "::group::Publish $tag"
             git cat-file -e "${commit}^{commit}"
-            git show "${commit}:firmware/SPACE_SHOOTER_ESP32S3/SPACE_SHOOTER_ESP32S3.ino"               | grep -Fq "#define GAME_VERSION \"${tag}\""
+            git show "${commit}:firmware/SPACE_SHOOTER_ESP32S3/SPACE_SHOOTER_ESP32S3.ino" > /tmp/release-firmware.ino
+            grep -Fq "#define GAME_VERSION \"${tag}\""
             if [[ "$tag" == "v6.0.0" ]]; then
-              if git show "${commit}:firmware/SPACE_SHOOTER_ESP32S3/SPACE_SHOOTER_ESP32S3.ino"                  | grep -Eiq 'konami|999999'; then
+              if grep -Eiq 'konami|999999' /tmp/release-firmware.ino; then
                 echo "ERROR: v6.0.0 firmware unexpectedly includes debug/Konami"
                 exit 1
               fi
