@@ -1,0 +1,84 @@
+name: Publish SPACE SHOOTER v6 releases
+
+# One-time, idempotent publication of the two reviewed firmware commits.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-v6-releases.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out complete git history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Publish v6.0.0 first, then v6.5.6
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+
+          publish() {
+            local tag="$1"
+            local commit="$2"
+            local release_name="$3"
+            local latest="$4"
+            local notes_path="$5"
+            local label="$6"
+
+            echo "::group::Publish $tag"
+            git cat-file -e "${commit}^{commit}"
+            git show "${commit}:firmware/SPACE_SHOOTER_ESP32S3/SPACE_SHOOTER_ESP32S3.ino"               | grep -Fq "#define GAME_VERSION \"${tag}\""
+            if [[ "$tag" == "v6.0.0" ]]; then
+              if git show "${commit}:firmware/SPACE_SHOOTER_ESP32S3/SPACE_SHOOTER_ESP32S3.ino"                  | grep -Eiq 'konami|999999'; then
+                echo "ERROR: v6.0.0 firmware unexpectedly includes debug/Konami"
+                exit 1
+              fi
+            fi
+
+            local existing_sha
+            existing_sha=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" --jq '.object.sha' 2>/dev/null || true)
+            if [[ -n "$existing_sha" && "$existing_sha" != "$commit" ]]; then
+              echo "ERROR: $tag already points to $existing_sha, expected $commit"
+              exit 1
+            fi
+            if [[ -z "$existing_sha" ]]; then
+              gh api -X POST "repos/${GITHUB_REPOSITORY}/git/refs"                 -f ref="refs/tags/${tag}" -f sha="$commit" >/dev/null
+            fi
+
+            if gh release view "$tag" --json url >/dev/null 2>&1; then
+              echo "$tag already has a release; leaving it untouched."
+              echo "::endgroup::"
+              return
+            fi
+
+            local zip="dist/SPACE-SHOOTER-ESP32S3-${tag}-SOURCE.zip"
+            git archive --format=zip --output="$zip" "$commit"
+            sha256sum "$zip" > "$zip.sha256"
+            git show "${commit}:${notes_path}" > "dist/NOTES-${tag}.md"
+            gh release create "$tag" "$zip" "$zip.sha256"               --verify-tag --target "$commit" --title "$release_name"               --notes-file "dist/NOTES-${tag}.md" --latest="$latest"
+            echo "Created $tag ($label)"
+            echo "::endgroup::"
+          }
+
+          publish v6.0.0 \
+            fad31cd77f41ec9a55d3dc839016952aa2a567e1 \
+            "SPACE SHOOTER v6.0.0 — Deep Test Fixed (sem debug)" \
+            false docs/RELEASE_NOTES_V6.0.0.md "without Konami"
+
+          publish v6.5.6 \
+            908a538513031896284522409418399448964c1d \
+            "SPACE SHOOTER v6.5.6 — Boss Intro & Diagnostics" \
+            true docs/RELEASE_NOTES_V6.5.6.md "new features"
+
+          gh release list --limit 8
