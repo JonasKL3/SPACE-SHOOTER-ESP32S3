@@ -1,5 +1,22 @@
 # Changelog
 
+## [6.0.0] — Deep Test Fixed (sem debug Konami)
+
+### Novidades
+- Bomba no botão SQUARE, contador visual e upgrades ampliados; 5 pets e novas conquistas.
+- Campanha de 50 níveis/10 bosses, loja de naves e upgrades, compatibilidade com progresso v5.
+- Firmware oficial **sem código Konami ou mecanismo de moedas/debug** (também sem a conquista Konami nesta release).
+
+### Bugs corrigidos
+- Progressão que travava no nível 2; colisões de blindados e projéteis perfurantes.
+- Recompensa do boss final, dano repetido, controle AUTO, pausa e confirmação de RESET DATA.
+- Preservação e migração cuidadosa da NVS anterior; melhor controle de gravações e mísseis órfãos.
+
+### Validação
+- 89 minutos e 333.755 frames de gameplay **simulado**, 2.882.412 verificações (ASan/UBSan).
+- Não houve compilação com Arduino-ESP32 real nem teste prolongado na placa física.
+- A biblioteca DabbleESP32 **precisa manter o patch externo** contra `heap_caps_free`. Ver `docs/DABBLE_BLE_RESET.md`.
+
 ## [5.0.0] - 2026-10-10
 
 ### Added

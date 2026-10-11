@@ -1,34 +1,26 @@
 /*
    =============================================================
-   SPACE SHOOTER v5.0
+   SPACE SHOOTER v6.0.0
    ESP32-S3 N16R8 + ILI9341 2.8" + Dabble BLE
    =============================================================
 
-   NOVIDADES v5.0:
-     - Sistema de moedas + loja + upgrades persistentes
-     - 5 naves alternativas com armas iniciais diferentes
-     - 15 achievements que valem moedas
-     - Dash com i-frames (TRIANGLE)
-     - Transicoes com pixel art em tela cheia
-     - Screen shake + hit flash
-     - 5 novos tipos de inimigos (total 9)
-     - +5 bosses (total 10) com 3 fases cada
-     - Tela de estatisticas detalhadas
-     - Arte da nave no menu
+   NOVIDADES v6.0.0:
+     - BOMBA funcionando (SQUARE para usar)
+     - Versao do jogo no canto inferior direito do menu
+     - useBomb() completo (inimigos + boss)
+     - Throttle de NVS + yield no loop
 */
 
 #define CUSTOM_SETTINGS
 #define INCLUDE_GAMEPAD_MODULE
-
-#define GAME_VERSION "v5.0.0"
-constexpr unsigned long DISPLAY_FRAME_MS = 42; // ~24 fps, mantem estabilidade SPI v4
-constexpr bool GAME_EVENT_LOGS = false;
 
 #include <Arduino.h>
 #include <TFT_eSPI.h>
 #include <DabbleESP32.h>
 #include <Preferences.h>
 #include <math.h>
+
+#define GAME_VERSION "v6.0.0"
 
 // =============================================================
 // DISPLAY
@@ -53,10 +45,11 @@ const int AREA_H = 205;
 #define MAX_BULLETS     32
 #define MAX_ENEMY_BULLS 40
 #define MAX_ENEMIES     28
-#define MAX_PARTICLES   100
+#define MAX_PARTICLES   80
 #define MAX_STARS       28
 #define MAX_POWERUPS     6
 #define MAX_COINS       16
+#define MAX_PETS         5
 
 // =============================================================
 // CORES
@@ -104,6 +97,8 @@ struct WeaponInfo {
   int         dmg;
 };
 
+const uint8_t ALL_WEAPONS_MASK = 0x3F;
+
 const WeaponInfo WEAPONS[] = {
   { "PADRAO",  0xFFE0, 0xFFFF, 180, 1 },
   { "DUPLO",   0x07FF, 0xBFFF, 160, 1 },
@@ -141,7 +136,7 @@ const ScenarioInfo SCENARIOS[] = {
 };
 
 // =============================================================
-// MODO DE CONTROLE
+// CONTROLE
 // =============================================================
 enum ControlMode {
   CTRL_DIGITAL = 0,
@@ -153,7 +148,7 @@ const int CTRL_COUNT = 3;
 const char* ctrlLabels[3] = { "DIGITAL", "JOYSTICK", "AUTO" };
 
 // =============================================================
-// NAVES
+// NAVES + PALETAS
 // =============================================================
 enum ShipType {
   SHIP_STANDARD = 0,
@@ -163,6 +158,12 @@ enum ShipType {
   SHIP_HUNTER
 };
 
+struct ShipPalette {
+  uint16_t cMain;
+  uint16_t cLight;
+  uint16_t cDark;
+};
+
 struct ShipInfo {
   const char* name;
   const char* desc;
@@ -170,20 +171,39 @@ struct ShipInfo {
   float       speed;
   int         startLives;
   int         cost;
-  uint16_t    cMain;
-  uint16_t    cLight;
-  uint16_t    cDark;
+  ShipPalette palettes[4];
 };
 
 const ShipInfo SHIPS[] = {
-  { "PADRAO",      "Equilibrada",        WPN_DEFAULT, 1.00f, 0, 0,    0x07E0, 0x07FF, 0x0320 },
-  { "EXPLORADORA", "Rapida + duplo",     WPN_DOUBLE,  1.30f, 0, 500,  0x07FF, 0xBFFF, 0x0410 },
-  { "PESADA",      "3 tiros + lenta",    WPN_TRIPLE,  0.85f, 1, 800,  0xFD20, 0xFFF0, 0x8000 },
-  { "LASER",       "Laser perfurante",   WPN_LASER,   1.00f, 0, 1200, 0xF800, 0xFFE0, 0x8000 },
-  { "CACADORA",    "Misseis teleguiados",WPN_MISSILE, 1.05f, 0, 1500, 0x8010, 0xE81F, 0x4008 }
+  { "PADRAO", "Equilibrada", WPN_DEFAULT, 1.00f, 0, 0,
+    { {0x07E0, 0x07FF, 0x0320}, {0x07FF, 0xBFFF, 0x0410},
+      {0xFE60, 0xFFF0, 0x8200}, {0x8010, 0xE81F, 0x4008} }
+  },
+  { "EXPLORADORA", "Rapida + duplo", WPN_DOUBLE, 1.30f, 0, 500,
+    { {0x001F, 0x07FF, 0x0008}, {0x07FF, 0xBFFF, 0x0410},
+      {0xFFFF, 0xCE79, 0x8410}, {0x07E0, 0xAFF0, 0x0320} }
+  },
+  { "PESADA", "3 tiros + lenta", WPN_TRIPLE, 0.85f, 1, 800,
+    { {0xFD20, 0xFFE0, 0x8000}, {0xF800, 0xFC00, 0x4000},
+      {0xFFE0, 0xFFF0, 0x8400}, {0x8410, 0xC618, 0x2104} }
+  },
+  { "LASER", "Laser perfurante", WPN_LASER, 1.00f, 0, 1200,
+    { {0xF800, 0xFC00, 0x8000}, {0xF81F, 0xFF9F, 0x4008},
+      {0xFFFF, 0xCE79, 0x8410}, {0x07FF, 0xBFFF, 0x0410} }
+  },
+  { "CACADORA", "Misseis teleguiados", WPN_MISSILE, 1.05f, 0, 1500,
+    { {0x8010, 0xE81F, 0x4008}, {0x4000, 0x8000, 0x2000},
+      {0x4208, 0x8410, 0x2104}, {0xFE60, 0xFFF0, 0x8200} }
+  }
 };
 
 const int SHIP_COUNT = 5;
+
+// =============================================================
+// SKINS (paleta dentro de cada nave)
+// =============================================================
+const int SKIN_COUNT = 4;
+const char* skinNames[SKIN_COUNT] = { "PALETA 1", "PALETA 2", "PALETA 3", "PALETA 4" };
 
 // =============================================================
 // UPGRADES
@@ -195,6 +215,12 @@ enum UpgradeType {
   UPG_DAMAGE,
   UPG_SPEED,
   UPG_DASH,
+  UPG_CRIT,
+  UPG_PIERCE,
+  UPG_COIN_MAGNET,
+  UPG_COIN_VALUE,
+  UPG_REVIVE,
+  UPG_START_BOMB,
   UPG_COUNT
 };
 
@@ -207,12 +233,47 @@ struct UpgradeInfo {
 };
 
 const UpgradeInfo UPGRADES[UPG_COUNT] = {
-  { "VIDAS",      "+1 vida inicial",     5, 300, 200 },
-  { "ESCUDO",     "Escudo +2s",          5, 250, 150 },
-  { "CADENCIA",   "Tiro +rapido",        5, 300, 200 },
-  { "DANO",       "+1 dano por tiro",    3, 800, 600 },
-  { "VELOCIDADE", "Nave +rapida",        5, 250, 150 },
-  { "DASH",       "Cooldown -20%",       3, 400, 300 }
+  { "VIDAS",       "+1 vida inicial",     5, 300, 200 },
+  { "ESCUDO",      "Escudo +2s",          5, 250, 150 },
+  { "CADENCIA",    "Tiro +rapido",        5, 300, 200 },
+  { "DANO",        "+1 dano por tiro",    3, 800, 600 },
+  { "VELOCIDADE",  "Nave +rapida",        5, 250, 150 },
+  { "DASH",        "Cooldown -20%",       3, 400, 300 },
+  { "CRITICO",     "+10% chance critico", 5, 600, 400 },
+  { "PERFURACAO",  "Tiro atravessa +1",   3, 700, 500 },
+  { "MAGNETISMO",  "Moedas atraem longe", 5, 350, 250 },
+  { "VALOR_MOEDA", "Moedas +25% valor",   5, 500, 350 },
+  { "REVIVE",      "+1 revive automatico",2, 1500, 1000 },
+  { "BOMBA_INICIO", "Comeca nivel c/ bomba",3, 900, 600 }
+};
+
+// =============================================================
+// PETS
+// =============================================================
+enum PetType {
+  PET_NONE = -1,
+  PET_BLASTER = 0,
+  PET_ORB,
+  PET_HEALER,
+  PET_COLLECTOR,
+  PET_SHIELDER,
+  PET_COUNT
+};
+
+struct PetInfo {
+  const char* name;
+  const char* desc;
+  int  cost;
+  uint16_t color;
+  uint16_t colorLight;
+};
+
+const PetInfo PETS[PET_COUNT] = {
+  { "BLASTER",   "Atira junto com voce",       800,  0x07FF, 0xBFFF },
+  { "ORB",       "Orbita e machuca inimigos",  1000, 0xF81F, 0xFF9F },
+  { "CURANDEIRO","+1 vida a cada 30s",         1200, 0x07E0, 0xAFF0 },
+  { "COLETOR",   "Puxa moedas automatico",     900,  0xFFE0, 0xFFF0 },
+  { "ESCUDEIRO", "Escudo a cada 20s",          1400, 0x8010, 0xE81F }
 };
 
 // =============================================================
@@ -234,6 +295,9 @@ enum AchvType {
   ACHV_SCORE_20000,
   ACHV_NO_HIT_LEVEL,
   ACHV_ALL_WEAPONS,
+  ACHV_PET_OWNER,
+  ACHV_PET_COLLECTOR,
+  ACHV_MAXED_SHIP,
   ACHV_COUNT
 };
 
@@ -258,7 +322,10 @@ const AchvInfo ACHIEVEMENTS[ACHV_COUNT] = {
   { "Pontuador",         "Alcance 5000 pontos",    100 },
   { "Elite",             "Alcance 20000 pontos",   500 },
   { "Perfeito",          "Passe nivel sem dano",   200 },
-  { "Arsenal",           "Use todas as armas",     250 }
+  { "Arsenal",           "Use todas as armas",     250 },
+  { "Amigo Fiel",        "Compre um pet",          100 },
+  { "Zoologico",         "Compre todos os pets",   500 },
+  { "Engenheiro",        "Maxeie uma nave",        300 },
 };
 
 // =============================================================
@@ -269,10 +336,11 @@ struct Bullet {
   float vx, vy;
   int   dmg;
   int   pierce;
-  uint32_t hitMask; // ate 28 inimigos
-  bool hitBoss;
   bool  guided;
-  WeaponType weapon; // tipo do tiro persiste apos troca de arma
+  bool  crit;
+  uint32_t hitMask; // cada projétil atinge cada inimigo no máximo uma vez
+  bool hitBoss;     // evita dano repetido no mesmo boss
+  uint16_t ageFrames; // evita misseis sem alvo ocupando slot para sempre
   uint16_t color;
   uint16_t colorLight;
   bool active;
@@ -319,6 +387,15 @@ struct Coin {
   int value;
   int life;
   bool active;
+};
+
+struct Pet {
+  bool active;
+  PetType type;
+  float x, y;
+  float angle;
+  unsigned long lastShot;
+  unsigned long lastSpecial;
 };
 
 // =============================================================
@@ -382,42 +459,25 @@ const BossConfig BOSS_CFG[] = {
 };
 
 // =============================================================
-// SKINS
-// =============================================================
-enum ShipSkin {
-  SKIN_DEFAULT = 0,
-  SKIN_CYAN,
-  SKIN_GOLD,
-  SKIN_PURPLE
-};
-
-const int SKIN_COUNT = 4;
-const char* skinNames[SKIN_COUNT] = { "VERDE", "CIANO", "DOURADA", "ROXA" };
-// Preserva os rotulos de selecao aprovados na v3/v4; indices e cores intactos.
-const char* skinMenuNames[SKIN_COUNT] = { "VERDE", "DOURADA", "CIANO", "ROXA" };
-
-// =============================================================
-// MODOS
+// MODOS E TELAS
 // =============================================================
 enum GameMode { MODE_CAMPAIGN, MODE_ENDLESS };
 
-// =============================================================
-// TELAS (nome do enum: ACHV_SCREEN, não ACHIEVEMENTS)
-// =============================================================
 enum GameState {
   MENU,
   MODE_SELECT,
   SKIN_SELECT,
   SHIP_SELECT,
   SHOP,
+  PET_SHOP,
   ACHV_SCREEN,
   CTRL_SELECT,
   STATS,
   PLAYING,
   PAUSED,
   GAME_OVER,
-  RESET_CONFIRM,
   TRANSITION,
+  RESET_CONFIRM,
   GAME_STATE_COUNT
 };
 
@@ -430,6 +490,7 @@ struct Game {
   float playerX, playerY;
   int playerW, playerH;
   int lives;
+  int maxLives;
   int score;
   int level;
   int combo;
@@ -449,22 +510,29 @@ struct Game {
   int dashTimer;
   int dashCooldown;
   bool invulnerable;
-  unsigned long invulnerableUntil;
 
   int  shakeAmount;
   int  shakeTimer;
-  int  flashTimer;
-  uint16_t flashColor;
 
   int  enemiesKilled;
   int  bossesKilled;
   int  coinsEarned;
   int  maxCombo;
   unsigned long startTime;
+  unsigned long levelStartTime;
   bool tookDamageThisLevel;
 
-  int  levelAtLastNoHit;
-  unsigned long stateTimer;   // usado na transição
+  int  levelAtLastNoLevel;
+  unsigned long stateTimer;
+
+  int revivesLeft;
+  int bombsLeft;
+  unsigned long lastReviveCheck;
+  unsigned long hitInvulnerableUntil;
+  bool newHighScore;
+  bool wonThisGame;
+  unsigned long activePlayMs;
+  unsigned long lastGameTickMs;
 } game;
 
 Bullet bullets[MAX_BULLETS];
@@ -474,6 +542,7 @@ Particle particles[MAX_PARTICLES];
 Star stars[MAX_STARS];
 PowerUp powerups[MAX_POWERUPS];
 Coin coins[MAX_COINS];
+Pet pets[MAX_PETS];
 
 uint16_t currentBgTint = 0x0000;
 
@@ -481,15 +550,13 @@ uint16_t currentBgTint = 0x0000;
 // NVS
 // =============================================================
 Preferences prefs;
-#define NVS_NS        "shooter" // mesmo namespace da v4: nao perde dados existentes
+#define NVS_NS        "shooter6"
 #define NVS_HISCORE   "hiscore"
 #define NVS_GAMES     "games"
 #define NVS_TOTAL     "total"
 #define NVS_SKIN      "skin"
 #define NVS_UNLOCK    "unlock"
 #define NVS_CAMPWON   "campwon"
-#define NVS_CAMP20     "camp20won"
-#define NVS_CAMP50     "camp50won"
 #define NVS_CTRLMODE  "ctrlmode"
 #define NVS_INVERTY   "inverty"
 #define NVS_COINS     "coins"
@@ -499,6 +566,8 @@ Preferences prefs;
 #define NVS_TOTALKILL "totalkill"
 #define NVS_TOTALBOSS "totalboss"
 #define NVS_TOTALTIME "totaltime"
+#define NVS_WEAPONS   "weapons"
+#define NVS_PETS      "pets"
 
 struct SaveData {
   int  highScore;
@@ -506,9 +575,7 @@ struct SaveData {
   int  totalScore;
   int  currentSkin;
   int  unlockedSkins;
-  bool campaignWon; // progresso legado, preservado
-  bool campaign20Won;
-  bool campaign50Won;
+  bool campaignWon;
   int  controlMode;
   bool invertY;
 
@@ -520,31 +587,25 @@ struct SaveData {
   int  totalKills;
   int  totalBosses;
   unsigned long totalTimeSec;
+  uint8_t weaponsUsedMask;
+  int  unlockedPets;
 };
 
 SaveData save;
-// Relogio da simulacao: nao avanca em menus, pausa ou transicoes.
-unsigned long gameClockMs = 0;
-unsigned long bossCooldownUntil = 0;
-bool gameResultRecorded = false, pendingGameSave = false;
-bool wonThisGame = false, newHighScoreThisGame = false;
-unsigned long gameOverWallMs = 0;
-uint8_t weaponsUsedMask = 0;
-struct FramePerf { uint32_t maxDrawUs, maxPushUs, maxLogicUs, slowFrames; };
-FramePerf perf = {0,0,0,0};
-int visualShakeX=0, visualShakeY=0;
-unsigned long gameNow() { return gameClockMs; }
 
+bool saveDirty = false;
+unsigned long lastSaveTime = 0;
+const unsigned long SAVE_MIN_INTERVAL = 3000;
+
+void markSaveDirty() { saveDirty = true; }
 
 void initSaveDefaults() {
   save.highScore = 0;
   save.gamesPlayed = 0;
   save.totalScore = 0;
   save.currentSkin = 0;
-  save.unlockedSkins = 0x01;
+  save.unlockedSkins = 0x0F;
   save.campaignWon = false;
-  save.campaign20Won = false;
-  save.campaign50Won = false;
   save.controlMode = CTRL_AUTO;
   save.invertY = true;
   save.coins = 0;
@@ -555,14 +616,13 @@ void initSaveDefaults() {
   save.totalKills = 0;
   save.totalBosses = 0;
   save.totalTimeSec = 0;
+  save.weaponsUsedMask = 0;
+  save.unlockedPets = 0;
 }
 
 // =============================================================
 // FORWARD DECLARATIONS
 // =============================================================
-bool skinUnlocked(int idx);
-void unlockSkin(int idx);
-void checkSkinUnlocks();
 bool shipUnlocked(int idx);
 bool achvUnlocked(int idx);
 void unlockAchv(AchvType type);
@@ -571,6 +631,10 @@ void saveAll();
 void resetSave();
 void onGameOver();
 void loadSave();
+bool petUnlocked(int idx);
+void updatePets();
+void drawPets();
+void useBomb();
 
 void updateStars();
 void initStars();
@@ -598,13 +662,16 @@ void tryDash();
 void onBossKilled();
 void damagePlayer(float x, float y);
 void spawnExplosion(float x, float y, int power);
-void spawnParticle(float x, float y, int count, uint16_t color);
+void spawnParticles(float x, float y, int count, uint16_t color);
 void spawnCoin(float x, float y, int baseValue);
 void spawnCoinBoss(float x, float y);
 void spawnPowerUp(float x, float y);
 void shake(int amount);
 void flash(uint16_t color, int frames);
 void pollDabble();
+void spawnBullet(float x, float y, float vx, float vy,
+                 int dmg, int pierce,
+                 uint16_t color, uint16_t colorLight);
 
 // =============================================================
 // INPUT
@@ -615,6 +682,7 @@ struct InputState {
   bool start, select;
   int axisX, axisY;
   bool hasAnalog;
+  bool dpadActive; // no AUTO, D-pad tem prioridade sobre o joystick
 };
 
 InputState input = {false,false,false,false,false,false,false,false,false,false,0,0,false};
@@ -625,10 +693,10 @@ const unsigned long DABBLE_POLL_MS = 30;
 // MENU
 // =============================================================
 int menuSelection = 0;
-const int MENU_ITEMS = 8;
-const char* menuLabels[8] = {
+const int MENU_ITEMS = 9;
+const char* menuLabels[9] = {
   "START GAME", "SKIN", "NAVES", "LOJA",
-  "CONQUISTAS", "CONTROLE", "STATS", "RESET DATA"
+  "PETS", "CONQUISTAS", "CONTROLE", "STATS", "RESET DATA"
 };
 
 int modeSelection = 0;
@@ -639,6 +707,7 @@ int skinSelection = 0;
 int shipSelection = 0;
 int shopSelection = 0;
 int ctrlSelection = 0;
+int petSelection = 0;
 
 enum ShopTab { SHOP_TAB_SHIPS, SHOP_TAB_UPGRADES, SHOP_TAB_COUNT };
 int shopTab = 0;
@@ -646,15 +715,15 @@ int shopIndex = 0;
 int shopScroll = 0;
 
 // =============================================================
-// POPUP DE ACHIEVEMENT
+// POPUPS (conquistas)
 // =============================================================
-struct AchvPopup {
+struct Popup {
   bool active;
   int  idx;
   unsigned long startTime;
   int  timer;
 };
-AchvPopup achvPopup = {false, 0, 0, 0};
+Popup popup = {false, 0, 0, 0};
 
 // =============================================================
 // UTIL
@@ -663,25 +732,12 @@ float randf(float lo, float hi) {
   return lo + (float)random(0, 10000) / 10000.0f * (hi - lo);
 }
 
-bool skinUnlocked(int idx) {
-  return (save.unlockedSkins & (1 << idx)) != 0;
-}
-
-void unlockSkin(int idx) {
-  if (!skinUnlocked(idx)) {
-    save.unlockedSkins |= (1 << idx);
-    if (GAME_EVENT_LOGS) Serial.printf(">>> SKIN: %s\n", skinNames[idx]);
-  }
-}
-
-void checkSkinUnlocks() {
-  if (save.totalScore >= 5000)  unlockSkin(SKIN_CYAN);
-  if (save.totalScore >= 20000) unlockSkin(SKIN_PURPLE);
-  if (save.campaignWon || save.campaign20Won || save.campaign50Won) unlockSkin(SKIN_GOLD);
-}
-
 bool shipUnlocked(int idx) {
   return (save.unlockedShips & (1 << idx)) != 0;
+}
+
+bool petUnlocked(int idx) {
+  return (save.unlockedPets & (1 << idx)) != 0;
 }
 
 bool achvUnlocked(int idx) {
@@ -694,14 +750,16 @@ bool achvUnlocked(int idx) {
 void unlockAchv(AchvType type) {
   if (achvUnlocked((int)type)) return;
   save.achievements |= (1 << (int)type);
-  save.coins += ACHIEVEMENTS[(int)type].reward;
-  achvPopup.active = true;
-  achvPopup.idx = (int)type;
-  achvPopup.startTime = millis();
-  achvPopup.timer = 78;
-  // NUNCA escrever flash no combate: grava junto ao Game Over.
-  if (GAME_EVENT_LOGS) Serial.printf("ACHV: %s (+%d)\n",
+  if (ACHIEVEMENTS[(int)type].reward > 0) {
+    save.coins += ACHIEVEMENTS[(int)type].reward;
+  }
+  popup.active = true;
+  popup.idx = (int)type;
+  popup.startTime = millis();
+  popup.timer = 240;
+  Serial.printf(">>> ACHV: %s (+%d)\n",
                 ACHIEVEMENTS[(int)type].name, ACHIEVEMENTS[(int)type].reward);
+  markSaveDirty();
 }
 
 void checkAchievements() {
@@ -714,12 +772,24 @@ void checkAchievements() {
   if (save.totalBosses >= 10)  unlockAchv(ACHV_BOSS_10);
   if (game.maxCombo >= 5)      unlockAchv(ACHV_COMBO_5);
   if (game.maxCombo >= 10)     unlockAchv(ACHV_COMBO_10);
-  if (save.totalTimeSec + gameNow() / 1000 >= 300)  unlockAchv(ACHV_SURVIVE_5MIN);
-  if (save.totalTimeSec + gameNow() / 1000 >= 900)  unlockAchv(ACHV_SURVIVE_15MIN);
-  if (save.highScore >= 5000 || game.score >= 5000) unlockAchv(ACHV_SCORE_5000);
-  if (save.highScore >= 20000 || game.score >= 20000) unlockAchv(ACHV_SCORE_20000);
-  if ((weaponsUsedMask & 0x3F) == 0x3F) unlockAchv(ACHV_ALL_WEAPONS);
-  // Perfeito e atribuido na conclusao REAL de nivel, em updateTimers().
+  if (save.totalTimeSec >= 300)  unlockAchv(ACHV_SURVIVE_5MIN);
+  if (save.totalTimeSec >= 900)  unlockAchv(ACHV_SURVIVE_15MIN);
+  if (save.highScore >= 5000)  unlockAchv(ACHV_SCORE_5000);
+  if (save.highScore >= 20000) unlockAchv(ACHV_SCORE_20000);
+  if ((save.weaponsUsedMask & ALL_WEAPONS_MASK) == ALL_WEAPONS_MASK) {
+    unlockAchv(ACHV_ALL_WEAPONS);
+  }
+  if (save.unlockedPets != 0) {
+    unlockAchv(ACHV_PET_OWNER);
+    int full = (1 << PET_COUNT) - 1;
+    if ((save.unlockedPets & full) == full) unlockAchv(ACHV_PET_COLLECTOR);
+  }
+  bool allShips = (save.unlockedShips == ((1 << SHIP_COUNT) - 1));
+  bool allUpg = true;
+  for (int i = 0; i < UPG_COUNT; i++) {
+    if (save.upgradeLevels[i] < UPGRADES[i].maxLevel) { allUpg = false; break; }
+  }
+  if (allShips && allUpg) unlockAchv(ACHV_MAXED_SHIP);
 }
 
 // =============================================================
@@ -727,14 +797,15 @@ void checkAchievements() {
 // =============================================================
 void loadSave() {
   prefs.begin(NVS_NS, true);
+  // A v5 usava namespace "shooter". Migramos APENAS quando a v6 está vazia,
+  // preservando a cópia antiga para recuperação e evitando reimportar reset.
+  bool v6Initialized = prefs.isKey(NVS_HISCORE) || prefs.isKey(NVS_COINS);
   save.highScore     = prefs.getInt(NVS_HISCORE, 0);
   save.gamesPlayed   = prefs.getInt(NVS_GAMES, 0);
   save.totalScore    = prefs.getInt(NVS_TOTAL, 0);
   save.currentSkin   = prefs.getInt(NVS_SKIN, 0);
-  save.unlockedSkins = prefs.getInt(NVS_UNLOCK, 0x01);
+  save.unlockedSkins = prefs.getInt(NVS_UNLOCK, 0x0F);
   save.campaignWon   = prefs.getBool(NVS_CAMPWON, false);
-  save.campaign20Won = prefs.getBool(NVS_CAMP20, false);
-  save.campaign50Won = prefs.getBool(NVS_CAMP50, false);
   save.controlMode   = prefs.getInt(NVS_CTRLMODE, CTRL_AUTO);
   save.invertY       = prefs.getBool(NVS_INVERTY, true);
   save.coins         = prefs.getInt(NVS_COINS, 0);
@@ -744,30 +815,61 @@ void loadSave() {
   save.totalKills    = prefs.getInt(NVS_TOTALKILL, 0);
   save.totalBosses   = prefs.getInt(NVS_TOTALBOSS, 0);
   save.totalTimeSec  = prefs.getULong(NVS_TOTALTIME, 0);
+  save.weaponsUsedMask = prefs.getUChar(NVS_WEAPONS, 0);
+  save.unlockedPets  = prefs.getInt(NVS_PETS, 0);
+
+  if (save.currentSkin < 0 || save.currentSkin >= SKIN_COUNT) save.currentSkin = 0;
+  if (save.currentShip < 0 || save.currentShip >= SHIP_COUNT) save.currentShip = SHIP_STANDARD;
+  if (save.controlMode < CTRL_DIGITAL || save.controlMode > CTRL_AUTO) save.controlMode = CTRL_AUTO;
+  save.unlockedSkins = 0x0F;
+  save.unlockedShips |= 0x01;
+  save.weaponsUsedMask &= ALL_WEAPONS_MASK;
+  save.unlockedPets &= ((1 << PET_COUNT) - 1);
 
   for (int i = 0; i < UPG_COUNT; i++) {
     char key[8];
     sprintf(key, "upg%d", i);
     save.upgradeLevels[i] = prefs.getInt(key, 0);
+    if (save.upgradeLevels[i] < 0) save.upgradeLevels[i] = 0;
+    if (save.upgradeLevels[i] > UPGRADES[i].maxLevel) save.upgradeLevels[i] = UPGRADES[i].maxLevel;
   }
 
   prefs.end();
-  // Sanitiza dados em NVS para impedir acesso fora dos arrays.
-  save.unlockedSkins = (save.unlockedSkins & ((1 << SKIN_COUNT)-1)) | 1;
-  save.unlockedShips = (save.unlockedShips & ((1 << SHIP_COUNT)-1)) | 1;
-  if (save.currentSkin < 0 || save.currentSkin >= SKIN_COUNT ||
-      !skinUnlocked(save.currentSkin)) save.currentSkin = SKIN_DEFAULT;
-  if (save.currentShip < 0 || save.currentShip >= SHIP_COUNT ||
-      !shipUnlocked(save.currentShip)) save.currentShip = SHIP_STANDARD;
-  if (save.controlMode < CTRL_DIGITAL || save.controlMode > CTRL_AUTO) save.controlMode = CTRL_AUTO;
-  if (save.coins < 0) save.coins = 0;
-  if (save.highScore < 0) save.highScore=0;
-  if (save.gamesPlayed < 0) save.gamesPlayed=0;
-  if (save.totalScore < 0) save.totalScore=0;
-  for (int i=0; i<UPG_COUNT; ++i)
-    save.upgradeLevels[i] = constrain(save.upgradeLevels[i], 0, UPGRADES[i].maxLevel);
-  Serial.printf("NVS: HI=%d Coins=%d Ship=%d Achv=0x%X\n",
-                save.highScore, save.coins, save.currentShip, save.achievements);
+  if (!v6Initialized) {
+    prefs.begin("shooter", true);
+    bool legacyExists = prefs.isKey(NVS_HISCORE) || prefs.isKey(NVS_COINS);
+    if (legacyExists) {
+      save.highScore = prefs.getInt(NVS_HISCORE, 0);
+      save.gamesPlayed = prefs.getInt(NVS_GAMES, 0);
+      save.totalScore = prefs.getInt(NVS_TOTAL, 0);
+      save.currentSkin = prefs.getInt(NVS_SKIN, 0);
+      save.campaignWon = prefs.getBool("camp50won", false);
+      save.controlMode = prefs.getInt(NVS_CTRLMODE, CTRL_AUTO);
+      save.invertY = prefs.getBool(NVS_INVERTY, true);
+      save.coins = prefs.getInt(NVS_COINS, 0);
+      save.currentShip = prefs.getInt(NVS_SHIP, SHIP_STANDARD);
+      save.unlockedShips = prefs.getInt(NVS_SHIPUNL, 1) | 1;
+      save.achievements = prefs.getInt(NVS_ACHV, 0) & ((1 << 15) - 1);
+      save.totalKills = prefs.getInt(NVS_TOTALKILL, 0);
+      save.totalBosses = prefs.getInt(NVS_TOTALBOSS, 0);
+      save.totalTimeSec = prefs.getULong(NVS_TOTALTIME, 0);
+      for (int i = 0; i < 6; i++) {
+        char key[8];
+        snprintf(key, sizeof(key), "upg%d", i);
+        save.upgradeLevels[i] = constrain(prefs.getInt(key, 0), 0, UPGRADES[i].maxLevel);
+      }
+      save.currentSkin = constrain(save.currentSkin, 0, SKIN_COUNT - 1);
+      save.currentShip = constrain(save.currentShip, 0, SHIP_COUNT - 1);
+      save.controlMode = constrain(save.controlMode, (int)CTRL_DIGITAL, (int)CTRL_AUTO);
+    }
+    prefs.end();
+    if (legacyExists) {
+      saveAll(); // grava uma cópia no namespace novo, sem apagar a v5
+      Serial.println("Migracao NVS v5 -> v6 realizada.");
+    }
+  }
+  Serial.printf("NVS: HI=%d Coins=%d Ship=%d Pets=0x%X\n",
+                save.highScore, save.coins, save.currentShip, save.unlockedPets);
 }
 
 void saveAll() {
@@ -778,8 +880,6 @@ void saveAll() {
   prefs.putInt(NVS_SKIN,    save.currentSkin);
   prefs.putInt(NVS_UNLOCK,  save.unlockedSkins);
   prefs.putBool(NVS_CAMPWON, save.campaignWon);
-  prefs.putBool(NVS_CAMP20, save.campaign20Won);
-  prefs.putBool(NVS_CAMP50, save.campaign50Won);
   prefs.putInt(NVS_CTRLMODE, save.controlMode);
   prefs.putBool(NVS_INVERTY, save.invertY);
   prefs.putInt(NVS_COINS,    save.coins);
@@ -789,6 +889,8 @@ void saveAll() {
   prefs.putInt(NVS_TOTALKILL, save.totalKills);
   prefs.putInt(NVS_TOTALBOSS, save.totalBosses);
   prefs.putULong(NVS_TOTALTIME, save.totalTimeSec);
+  prefs.putUChar(NVS_WEAPONS, save.weaponsUsedMask);
+  prefs.putInt(NVS_PETS,     save.unlockedPets);
 
   for (int i = 0; i < UPG_COUNT; i++) {
     char key[8];
@@ -796,6 +898,8 @@ void saveAll() {
     prefs.putInt(key, save.upgradeLevels[i]);
   }
   prefs.end();
+  saveDirty = false;
+  lastSaveTime = millis();
 }
 
 void resetSave() {
@@ -805,60 +909,70 @@ void resetSave() {
 }
 
 void onGameOver() {
-  if (gameResultRecorded) return; // nao contar morte/vitoria duas vezes
-  gameResultRecorded = true;
-  newHighScoreThisGame = game.score > save.highScore;
   save.gamesPlayed++;
   save.totalScore += game.score;
-  if (newHighScoreThisGame) save.highScore = game.score;
-  save.totalTimeSec += gameNow() / 1000;
+  game.newHighScore = game.score > save.highScore;
+  if (game.newHighScore) save.highScore = game.score;
+  save.totalTimeSec += game.activePlayMs / 1000;
   save.coins += game.coinsEarned;
-  checkSkinUnlocks();
   checkAchievements();
-  pendingGameSave = true; // gravar na tela de resultado, nao durante boss/colisao
-  gameOverWallMs = millis();
-  game.state = GAME_OVER;
-}
-
-void commitGameSave() {
-  if (!pendingGameSave) return;
   saveAll();
-  pendingGameSave = false;
 }
 
 // =============================================================
 // INPUT DABBLE
 // =============================================================
 void pollDabble() {
-  Dabble.processInput(); // processamento BLE continuo como na v4
-  input.up=GamePad.isUpPressed(); input.down=GamePad.isDownPressed();
-  input.left=GamePad.isLeftPressed(); input.right=GamePad.isRightPressed();
-  input.cross=GamePad.isCrossPressed(); input.circle=GamePad.isCirclePressed();
-  input.triangle=GamePad.isTrianglePressed(); input.square=GamePad.isSquarePressed();
-  input.start=GamePad.isStartPressed(); input.select=GamePad.isSelectPressed();
-  int ax=GamePad.getXaxisData(), ay=GamePad.getYaxisData();
-  if(save.invertY) ay=-ay; // Dabble reporta "cima" positivo.
-  if(abs(ax)<=1) ax=0;
-  if(abs(ay)<=1) ay=0;
-  input.axisX=constrain(ax,-7,7); input.axisY=constrain(ay,-7,7);
-  input.hasAnalog=(input.axisX!=0 || input.axisY!=0);
-}
+  if (millis() - lastDabblePoll < DABBLE_POLL_MS) return;
+  lastDabblePoll = millis();
 
-bool hasDigitalMovement() {return input.up || input.down || input.left || input.right;}
-bool useAnalogMovement() {
-  if (save.controlMode == CTRL_DIGITAL) return false;
-  if (hasDigitalMovement()) return false; // D-pad sempre tem prioridade
-  return save.controlMode == CTRL_JOYSTICK || input.hasAnalog;
+  Dabble.processInput();
+
+  int ax = GamePad.getXaxisData();
+  int ay = GamePad.getYaxisData();
+  if (save.invertY) ay = -ay;
+
+  if (abs(ax) < 1) ax = 0;
+  if (abs(ay) < 1) ay = 0;
+
+  input.axisX = ax;
+  input.axisY = ay;
+  input.hasAnalog = (abs(ax) > 1 || abs(ay) > 1);
+
+  input.up       = GamePad.isUpPressed();
+  input.down     = GamePad.isDownPressed();
+  input.left     = GamePad.isLeftPressed();
+  input.right    = GamePad.isRightPressed();
+  input.dpadActive = input.up || input.down || input.left || input.right;
+  input.cross    = GamePad.isCrossPressed();
+  input.circle   = GamePad.isCirclePressed();
+  input.triangle = GamePad.isTrianglePressed();
+  input.square   = GamePad.isSquarePressed();
+  input.start    = GamePad.isStartPressed();
+  input.select   = GamePad.isSelectPressed();
+
+  bool useAnalog = false;
+  switch (save.controlMode) {
+    case CTRL_DIGITAL:  useAnalog = false; break;
+    case CTRL_JOYSTICK: useAnalog = true;  break;
+    case CTRL_AUTO:
+    default: useAnalog = input.hasAnalog && !input.dpadActive; break;
+  }
+
+  if (useAnalog) {
+    const int DZ = 2;
+    if (ay < -DZ) input.up = true;
+    if (ay >  DZ) input.down = true;
+    if (ax < -DZ) input.left = true;
+    if (ax >  DZ) input.right = true;
+  }
 }
-bool navUpNow() {return hasDigitalMovement()? input.up : input.axisY < -2 && save.controlMode != CTRL_DIGITAL;}
-bool navDownNow() {return hasDigitalMovement()? input.down : input.axisY > 2 && save.controlMode != CTRL_DIGITAL;}
-bool navLeftNow() {return hasDigitalMovement()? input.left : input.axisX < -2 && save.controlMode != CTRL_DIGITAL;}
-bool navRightNow() {return hasDigitalMovement()? input.right : input.axisX > 2 && save.controlMode != CTRL_DIGITAL;}
 
 // =============================================================
 // CUSTO DE UPGRADE
 // =============================================================
 int upgradeCost(int idx) {
+  if (idx < 0 || idx >= UPG_COUNT) return -1;
   const UpgradeInfo& u = UPGRADES[idx];
   int lvl = save.upgradeLevels[idx];
   if (lvl >= u.maxLevel) return -1;
@@ -909,7 +1023,6 @@ void drawStars() {
     } else {
       c = canvas.color565(stars[i].bright, stars[i].bright, stars[i].bright);
     }
-
     int sx = (int)stars[i].x, sy = (int)stars[i].y;
     canvas.drawPixel(sx, sy, c);
     if (stars[i].speed > 1.8f) canvas.drawPixel(sx, sy - 1, c);
@@ -927,8 +1040,9 @@ void resetGame() {
   game.playerW = 20;
   game.playerH = 22;
 
-  game.lives = 3 + save.upgradeLevels[UPG_LIVES] + ship.startLives;
-  if (game.lives > 9) game.lives = 9;
+  game.maxLives = 3 + save.upgradeLevels[UPG_LIVES] + ship.startLives;
+  if (game.maxLives > 9) game.maxLives = 9;
+  game.lives = game.maxLives;
 
   game.score = 0;
   game.level = 1;
@@ -939,7 +1053,7 @@ void resetGame() {
   if (game.fireCooldown < 80) game.fireCooldown = 80;
   game.lastFireTime = 0;
   game.enemySpawnInterval = 900;
-  game.lastEnemySpawn = 0; // usa o relogio do jogo, nao uptime do sistema
+  game.lastEnemySpawn = millis();
   game.shieldTimer = 0;
   game.maxShieldTimer = 800 + save.upgradeLevels[UPG_SHIELD] * 100;
   game.weapon = ship.startWeapon;
@@ -952,26 +1066,47 @@ void resetGame() {
   game.dashTimer = 0;
   game.dashCooldown = 0;
   game.invulnerable = false;
-  game.invulnerableUntil = 0;
 
   game.shakeAmount = 0;
   game.shakeTimer = 0;
-  game.flashTimer = 0;
-  game.flashColor = 0;
 
   game.enemiesKilled = 0;
   game.bossesKilled = 0;
   game.coinsEarned = 0;
-  game.startTime = millis(); // somente informativo; duracao usa gameClockMs
-  gameClockMs = 0; bossCooldownUntil = 0;
-  gameResultRecorded = false; pendingGameSave = false;
-  wonThisGame = false; newHighScoreThisGame = false;
-  weaponsUsedMask = (uint8_t)(1u << (int)ship.startWeapon);
+  game.startTime = millis();
+  game.levelStartTime = millis();
   game.tookDamageThisLevel = false;
-  game.levelAtLastNoHit = 1;
+  game.levelAtLastNoLevel = 1;
   game.stateTimer = 0;
 
+  game.revivesLeft = save.upgradeLevels[UPG_REVIVE];
+  game.bombsLeft = save.upgradeLevels[UPG_START_BOMB];
+  game.lastReviveCheck = millis();
+  game.hitInvulnerableUntil = 0;
+  game.newHighScore = false;
+  game.wonThisGame = false;
+  game.activePlayMs = 0;
+  game.lastGameTickMs = millis();
+
   boss.active = false;
+
+  for (int i = 0; i < MAX_PETS; i++) {
+    pets[i].active = false;
+    pets[i].lastShot = 0;
+    pets[i].lastSpecial = 0;
+  }
+
+  int petSlot = 0;
+  for (int i = 0; i < PET_COUNT && petSlot < MAX_PETS; i++) {
+    if (petUnlocked(i)) {
+      pets[petSlot].active = true;
+      pets[petSlot].type = (PetType)i;
+      pets[petSlot].angle = petSlot * (TWO_PI / MAX_PETS);
+      pets[petSlot].lastShot = millis();
+      pets[petSlot].lastSpecial = millis();
+      petSlot++;
+    }
+  }
 
   for (int i = 0; i < MAX_BULLETS; i++)      bullets[i].active = false;
   for (int i = 0; i < MAX_ENEMY_BULLS; i++)  enemyBullets[i].active = false;
@@ -993,13 +1128,20 @@ void spawnBullet(float x, float y, float vx, float vy,
     if (!bullets[i].active) {
       bullets[i].x = x; bullets[i].y = y;
       bullets[i].vx = vx; bullets[i].vy = vy;
-      bullets[i].dmg = dmg + save.upgradeLevels[UPG_DAMAGE];
-      bullets[i].pierce = pierce;
-      bullets[i].hitMask = 0; bullets[i].hitBoss = false;
+
+      bool isCrit = (random(0, 100) < save.upgradeLevels[UPG_CRIT] * 10);
+      int finalDmg = dmg + save.upgradeLevels[UPG_DAMAGE];
+      if (isCrit) finalDmg *= 2;
+
+      bullets[i].dmg = finalDmg;
+      bullets[i].crit = isCrit;
+      bullets[i].pierce = pierce + save.upgradeLevels[UPG_PIERCE];
       bullets[i].guided = false;
-      bullets[i].weapon=game.weapon;
-      bullets[i].color = color;
-      bullets[i].colorLight = colorLight;
+      bullets[i].hitMask = 0;
+      bullets[i].hitBoss = false;
+      bullets[i].ageFrames = 0;
+      bullets[i].color = isCrit ? 0xFFFF : color;
+      bullets[i].colorLight = isCrit ? 0xFFE0 : colorLight;
       bullets[i].active = true;
       return;
     }
@@ -1067,8 +1209,8 @@ void spawnEnemy() {
       enemies[i].y = AREA_Y - 20;
       enemies[i].vy = 1.2f + game.level * 0.10f + randf(0, 0.5f);
       enemies[i].vx = 0;
-      enemies[i].lastShot = gameNow();
-      enemies[i].lastSpecial = gameNow();
+      enemies[i].lastShot = millis();
+      enemies[i].lastSpecial = millis();
       enemies[i].specialTimer = 0;
       enemies[i].active = true;
       return;
@@ -1077,18 +1219,20 @@ void spawnEnemy() {
 }
 
 void spawnParticles(float x, float y, int count, uint16_t color) {
-  static int nextParticle = 0;
-  int spawned=0, pos=nextParticle;
-  for(int checked=0; checked<MAX_PARTICLES && spawned<count; ++checked) {
-    int i=pos; pos=(pos+1)%MAX_PARTICLES;
-    if(particles[i].active) continue;
-    float ang=randf(0,TWO_PI), sp=randf(1.0f,4.0f);
-    particles[i].x=x; particles[i].y=y;
-    particles[i].vx=cosf(ang)*sp; particles[i].vy=sinf(ang)*sp;
-    particles[i].life=random(15,30); particles[i].color=color;
-    particles[i].active=true; ++spawned;
+  int spawned = 0;
+  for (int i = 0; i < MAX_PARTICLES && spawned < count; i++) {
+    if (!particles[i].active) {
+      float ang = randf(0, TWO_PI);
+      float sp  = randf(1.0f, 4.0f);
+      particles[i].x = x; particles[i].y = y;
+      particles[i].vx = cosf(ang) * sp;
+      particles[i].vy = sinf(ang) * sp;
+      particles[i].life = random(15, 30);
+      particles[i].color = color;
+      particles[i].active = true;
+      spawned++;
+    }
   }
-  nextParticle=pos;
 }
 
 void spawnExplosion(float x, float y, int power) {
@@ -1114,16 +1258,15 @@ void spawnPowerUp(float x, float y) {
   }
 }
 
-// =============================================================
-// COINS
-// =============================================================
 void spawnCoin(float x, float y, int baseValue) {
   for (int i = 0; i < MAX_COINS; i++) {
     if (!coins[i].active) {
       coins[i].x = x;
       coins[i].y = y;
       coins[i].vy = 1.5f;
-      coins[i].value = baseValue + random(0, 3);
+      int val = baseValue + random(0, 3);
+      int bonus = (val * save.upgradeLevels[UPG_COIN_VALUE]) / 4;
+      coins[i].value = val + bonus;
       coins[i].life = 600;
       coins[i].active = true;
       return;
@@ -1138,7 +1281,9 @@ void spawnCoinBoss(float x, float y) {
         coins[i].x = x + k * 25;
         coins[i].y = y;
         coins[i].vy = 1.5f;
-        coins[i].value = 30 + random(0, 50);
+        int val = 30 + random(0, 50);
+        int bonus = (val * save.upgradeLevels[UPG_COIN_VALUE]) / 4;
+        coins[i].value = val + bonus;
         coins[i].life = 900;
         coins[i].active = true;
         break;
@@ -1156,8 +1301,46 @@ void shake(int amount) {
 }
 
 void flash(uint16_t color, int frames) {
-  game.flashColor = color;
-  game.flashTimer = frames;
+  (void)color;
+  (void)frames;
+}
+
+// =============================================================
+// BOMBA
+// =============================================================
+void useBomb() {
+  if (game.bombsLeft <= 0) return;
+  game.bombsLeft--;
+
+  // A lista de partículas tem limite fixo: 12 efeitos distribuídos são
+  // suficientes para preencher a tela, evitando dezenas de varreduras extras.
+  for (int i = 0; i < 12; i++) {
+    float px = randf(AREA_X, AREA_X + AREA_W);
+    float py = randf(AREA_Y, AREA_Y + AREA_H);
+    spawnExplosion(px, py, 1);
+  }
+
+  shake(15);
+
+  for (int i = 0; i < MAX_ENEMIES; i++) {
+    if (!enemies[i].active) continue;
+    game.score += 10;
+    game.enemiesKilled++;
+    save.totalKills++;
+    spawnExplosion(enemies[i].x, enemies[i].y, 2);
+    if (random(0, 100) < 30) spawnCoin(enemies[i].x, enemies[i].y, 1);
+    enemies[i].active = false;
+  }
+
+  for (int i = 0; i < MAX_ENEMY_BULLS; i++) enemyBullets[i].active = false;
+
+  if (boss.active) {
+    boss.hp -= 30;
+    spawnExplosion(boss.x, boss.y, 3);
+    if (boss.hp <= 0) onBossKilled();
+  }
+
+  Serial.printf("BOMBA! Restam: %d\n", game.bombsLeft);
 }
 
 // =============================================================
@@ -1167,7 +1350,14 @@ void tryDash() {
   if (game.dashCooldown > 0) return;
   float mvx = 0, mvy = 0;
 
-  if (useAnalogMovement()) {
+  bool useAnalog = false;
+  switch (save.controlMode) {
+    case CTRL_JOYSTICK: useAnalog = true; break;
+    case CTRL_AUTO:     useAnalog = input.hasAnalog && !input.dpadActive; break;
+    case CTRL_DIGITAL:  useAnalog = false; break;
+  }
+
+  if (useAnalog) {
     mvx = input.axisX / 7.0f;
     mvy = input.axisY / 7.0f;
   } else {
@@ -1198,15 +1388,33 @@ void tryDash() {
 // DANO
 // =============================================================
 void damagePlayer(float x, float y) {
-  if(game.state != PLAYING || game.dashTimer>0 || gameNow()<game.invulnerableUntil) return;
-  if(game.shieldTimer>0) { spawnParticles(x,y,3,C_POWERUP); return; }
-  --game.lives;
-  game.tookDamageThisLevel=true;
-  game.invulnerableUntil=gameNow()+700; // 700 ms igual v4
-  game.invulnerable=true;
-  spawnExplosion(x,y,2);
-  shake(5); flash(0xF800,4);
-  if(game.lives<=0) onGameOver();
+  if (game.state != PLAYING) return;
+  if (game.invulnerable || (game.hitInvulnerableUntil != 0 &&
+      (long)(millis() - game.hitInvulnerableUntil) < 0)) return;
+  if (game.shieldTimer > 0) {
+    spawnParticles(x, y, 5, C_POWERUP);
+    return;
+  }
+
+  if (game.revivesLeft > 0 && game.lives <= 1) {
+    game.revivesLeft--;
+    game.lives = game.maxLives;
+    game.invulnerable = true;
+    game.dashTimer = 60;
+    Serial.println("REVIVE!");
+    return;
+  }
+
+  game.lives--;
+  game.hitInvulnerableUntil = millis() + 900;
+  game.tookDamageThisLevel = true;
+  spawnExplosion(x, y, 2);
+  shake(6);
+
+  if (game.lives <= 0) {
+    onGameOver();
+    game.state = GAME_OVER;
+  }
 }
 
 // =============================================================
@@ -1228,10 +1436,10 @@ void spawnBoss(BossType type) {
   boss.phase = 1;
   boss.angleAccum = 0;
   boss.attackMode = 0;
-  boss.lastAttack = gameNow();
+  boss.lastAttack = millis();
   boss.attackInterval = cfg.baseAttackMs;
-  boss.spawnTime = gameNow();
-  boss.lastPhaseSwap = gameNow();
+  boss.spawnTime = millis();
+  boss.lastPhaseSwap = millis();
   boss.shielded = false;
   boss.shieldUntil = 0;
   boss.extraState = 0;
@@ -1239,7 +1447,7 @@ void spawnBoss(BossType type) {
   boss.targetY = boss.y;
 
   shake(10);
-  if(GAME_EVENT_LOGS) Serial.printf("BOSS tipo=%d HP=%d\n", (int)type, boss.maxHp);
+  Serial.printf("BOSS tipo=%d HP=%d\n", (int)type, boss.maxHp);
 }
 
 void bossShootAtPlayer(float speed, int count, float spreadRad) {
@@ -1263,8 +1471,8 @@ void updateBossSentinel() {
   boss.x += boss.vx;
   if (boss.x < AREA_X + boss.w/2) { boss.x = AREA_X + boss.w/2; boss.vx = -boss.vx; }
   if (boss.x > AREA_X + AREA_W - boss.w/2) { boss.x = AREA_X + AREA_W - boss.w/2; boss.vx = -boss.vx; }
-  if (gameNow() - boss.lastAttack > boss.attackInterval) {
-    boss.lastAttack = gameNow();
+  if (millis() - boss.lastAttack > boss.attackInterval) {
+    boss.lastAttack = millis();
     int n = (boss.phase == 1) ? 5 : (boss.phase == 2) ? 7 : 9;
     bossShootAtPlayer(2.8f, n, 0.25f);
   }
@@ -1276,8 +1484,8 @@ void updateBossHydra() {
   boss.x += boss.vx;
   if (boss.x < AREA_X + boss.w/2) { boss.x = AREA_X + boss.w/2; boss.vx = -boss.vx; }
   if (boss.x > AREA_X + AREA_W - boss.w/2) { boss.x = AREA_X + AREA_W - boss.w/2; boss.vx = -boss.vx; }
-  if (gameNow() - boss.lastAttack > boss.attackInterval / 3) {
-    boss.lastAttack = gameNow();
+  if (millis() - boss.lastAttack > boss.attackInterval / 3) {
+    boss.lastAttack = millis();
     for (int h = -1; h <= 1; h++) {
       float hx = boss.x + h * 25;
       float hy = boss.y - 10;
@@ -1297,10 +1505,11 @@ void updateBossPrime() {
   boss.y += cosf(boss.angleAccum * 0.7f) * 0.8f;
   boss.x = constrain(boss.x, AREA_X + boss.w/2, AREA_X + AREA_W - boss.w/2);
   boss.y = constrain(boss.y, AREA_Y + 30, AREA_Y + 90);
-  if (gameNow() - boss.lastAttack > boss.attackInterval) {
-    boss.lastAttack = gameNow();
-    if (gameNow() - boss.lastPhaseSwap > 4000) { boss.attackMode = (boss.attackMode + 1) % 2; boss.lastPhaseSwap = gameNow(); }
-    if (boss.attackMode == 0) {
+  if (millis() - boss.lastAttack > boss.attackInterval) {
+    boss.lastAttack = millis();
+    static int primeMode = 0;
+    if (millis() - boss.lastPhaseSwap > 4000) { primeMode = (primeMode + 1) % 2; boss.lastPhaseSwap = millis(); }
+    if (primeMode == 0) {
       bossShootRadial((boss.phase == 3) ? 10 : (boss.phase == 2) ? 8 : 6, 2.5f, boss.angleAccum * 2.0f);
     } else {
       boss.x = randf(AREA_X + 30, AREA_X + AREA_W - 30);
@@ -1316,15 +1525,15 @@ void updateBossDevourer() {
   boss.x += boss.vx * 0.6f;
   if (boss.x < AREA_X + boss.w/2) { boss.x = AREA_X + boss.w/2; boss.vx = -boss.vx; }
   if (boss.x > AREA_X + AREA_W - boss.w/2) { boss.x = AREA_X + AREA_W - boss.w/2; boss.vx = -boss.vx; }
-  if (!boss.shielded && gameNow() - boss.lastPhaseSwap > 8000) {
+  if (!boss.shielded && millis() - boss.lastPhaseSwap > 8000) {
     boss.shielded = true;
-    boss.shieldUntil = gameNow() + 2500;
-    boss.lastPhaseSwap = gameNow();
+    boss.shieldUntil = millis() + 2500;
+    boss.lastPhaseSwap = millis();
   }
-  if (boss.shielded && (long)(gameNow()-boss.shieldUntil) >= 0) boss.shielded = false;
+  if (boss.shielded && millis() > boss.shieldUntil) boss.shielded = false;
   if (boss.shielded) return;
-  if (gameNow() - boss.lastAttack > boss.attackInterval) {
-    boss.lastAttack = gameNow();
+  if (millis() - boss.lastAttack > boss.attackInterval) {
+    boss.lastAttack = millis();
     boss.angleAccum += 0.3f;
     int arms = (boss.phase == 3) ? 6 : 4;
     for (int i = 0; i < arms; i++) {
@@ -1341,13 +1550,13 @@ void updateBossOmega() {
   boss.angleAccum += 0.08f;
   boss.x = AREA_X + AREA_W/2 + sinf(boss.angleAccum) * (AREA_W/2 - 50);
   boss.y = AREA_Y + 50 + cosf(boss.angleAccum * 1.3f) * 15;
-  if (gameNow() - boss.lastAttack > boss.attackInterval) {
-    boss.lastAttack = gameNow();
+  if (millis() - boss.lastAttack > boss.attackInterval) {
+    boss.lastAttack = millis();
     boss.attackMode = (boss.attackMode + 1) % 4;
     int count = (boss.phase == 3) ? 2 : 1;
     for (int k = 0; k < count; k++) {
       switch (boss.attackMode) {
-        case 0: bossShootRadial(12, 2.5f, gameNow()/500.0f + k); break;
+        case 0: bossShootRadial(12, 2.5f, millis()/500.0f + k); break;
         case 1: bossShootAtPlayer(3.0f, 9, 0.25f); break;
         case 2: bossShootRadial(16, 1.8f, 0); break;
         case 3: bossShootAtPlayer(4.0f, 3, 0.5f); break;
@@ -1362,8 +1571,8 @@ void updateBossPhantom() {
   boss.angleAccum += 0.04f;
   boss.x = AREA_X + AREA_W/2 + sinf(boss.angleAccum) * (AREA_W/2 - 60);
   boss.y = AREA_Y + 55 + cosf(boss.angleAccum * 0.9f) * 20;
-  if (gameNow() - boss.lastAttack > boss.attackInterval) {
-    boss.lastAttack = gameNow();
+  if (millis() - boss.lastAttack > boss.attackInterval) {
+    boss.lastAttack = millis();
     boss.attackMode = (boss.attackMode + 1) % 3;
     if (boss.attackMode == 0) {
       boss.x = randf(AREA_X + 40, AREA_X + AREA_W - 40);
@@ -1386,22 +1595,22 @@ void updateBossWarlord() {
   if (boss.x < AREA_X + boss.w/2) { boss.x = AREA_X + boss.w/2; boss.vx = -boss.vx; }
   if (boss.x > AREA_X + AREA_W - boss.w/2) { boss.x = AREA_X + AREA_W - boss.w/2; boss.vx = -boss.vx; }
   boss.y = AREA_Y + 55;
-  if (gameNow() - boss.lastAttack > boss.attackInterval) {
-    boss.lastAttack = gameNow();
+  if (millis() - boss.lastAttack > boss.attackInterval) {
+    boss.lastAttack = millis();
     boss.attackMode = (boss.attackMode + 1) % 3;
     if (boss.attackMode == 0) {
       for (int i = 0; i < (boss.phase >= 2 ? 5 : 3); i++) {
         float dx = game.playerX - boss.x + randf(-30, 30);
         float dy = game.playerY - boss.y + randf(-30, 30);
         float d = sqrtf(dx*dx + dy*dy);
-        if(d>0.001f) spawnEnemyBullet(boss.x, boss.y, dx/d*2.8f, dy/d*2.8f);
+        spawnEnemyBullet(boss.x, boss.y, dx/d*2.8f, dy/d*2.8f);
       }
     } else if (boss.attackMode == 1) {
       for (int i = 0; i < 8; i++) {
         spawnEnemyBullet(boss.x - 40 + i * 10, boss.y + 15, 0, 3.5f);
       }
     } else {
-      bossShootRadial((boss.phase == 3) ? 14 : 10, 2.2f, gameNow()/300.0f);
+      bossShootRadial((boss.phase == 3) ? 14 : 10, 2.2f, millis()/300.0f);
     }
   }
   if (boss.phase == 1 && boss.hp < boss.maxHp * 0.66f) { boss.phase = 2; boss.attackInterval = BOSS_CFG[6].enragedAttackMs; }
@@ -1412,8 +1621,8 @@ void updateBossCrystal() {
   boss.angleAccum += 0.06f;
   boss.x = AREA_X + AREA_W/2 + sinf(boss.angleAccum) * 60;
   boss.y = AREA_Y + 50;
-  if (gameNow() - boss.lastAttack > boss.attackInterval) {
-    boss.lastAttack = gameNow();
+  if (millis() - boss.lastAttack > boss.attackInterval) {
+    boss.lastAttack = millis();
     boss.attackMode = (boss.attackMode + 1) % 4;
     float baseAngle = boss.angleAccum * 2.0f;
     int prismas = (boss.phase == 3) ? 6 : 4;
@@ -1434,8 +1643,8 @@ void updateBossTitan() {
   boss.x += boss.vx * 0.3f;
   if (boss.x < AREA_X + boss.w/2) { boss.x = AREA_X + boss.w/2; boss.vx = -boss.vx; }
   if (boss.x > AREA_X + AREA_W - boss.w/2) { boss.x = AREA_X + AREA_W - boss.w/2; boss.vx = -boss.vx; }
-  if (gameNow() - boss.lastAttack > boss.attackInterval) {
-    boss.lastAttack = gameNow();
+  if (millis() - boss.lastAttack > boss.attackInterval) {
+    boss.lastAttack = millis();
     boss.attackMode = (boss.attackMode + 1) % 3;
     if (boss.attackMode == 0) {
       for (int i = 0; i < 12; i++) {
@@ -1469,8 +1678,8 @@ void updateBossVoid() {
     boss.x = AREA_X + AREA_W/2 + sinf(boss.angleAccum * 1.7f) * (AREA_W/2 - 60);
     boss.y = AREA_Y + 50 + cosf(boss.angleAccum * 1.1f) * 25;
   }
-  if (gameNow() - boss.lastAttack > boss.attackInterval) {
-    boss.lastAttack = gameNow();
+  if (millis() - boss.lastAttack > boss.attackInterval) {
+    boss.lastAttack = millis();
     if (boss.phase == 1) {
       bossShootRadial(10, 2.5f, boss.angleAccum);
     } else if (boss.phase == 2) {
@@ -1516,16 +1725,15 @@ void onBossKilled() {
   spawnExplosion(boss.x, boss.y - 15, 3);
 
   int reward = 500 + (int)boss.type * 250;
-  bossCooldownUntil=gameNow()+1200;
   game.score += reward;
 
-  // O boss final encerra a gameplay. Recompensas que exigem coleta no
-  // cenario ficam inacessiveis depois da tela de vitoria.
-  const bool finalCampaignBoss =
-      (game.mode == MODE_CAMPAIGN && game.level >= 50 && boss.type == BOSS_VOID);
-  if (finalCampaignBoss) {
-    // Credita as mesmas tres recompensas de 30..79 moedas diretamente.
-    for (int i = 0; i < 3; ++i) game.coinsEarned += 30 + random(0, 50);
+  const bool finalVictory = (game.mode == MODE_CAMPAIGN && game.level >= 50 && boss.type == BOSS_VOID);
+  if (finalVictory) {
+    // A vitória bloqueia a coleta: creditar diretamente as moedas do boss final.
+    for (int k = 0; k < 3; ++k) {
+      int val = 30 + random(0, 50);
+      game.coinsEarned += val + (val * save.upgradeLevels[UPG_COIN_VALUE]) / 4;
+    }
   } else {
     spawnPowerUp(boss.x, boss.y);
     spawnPowerUp(boss.x - 30, boss.y);
@@ -1536,22 +1744,18 @@ void onBossKilled() {
   boss.active = false;
   game.bossesKilled++;
   save.totalBosses++;
-  for(int i=0;i<MAX_ENEMY_BULLS;i++) enemyBullets[i].active=false;
-  checkAchievements();
 
   shake(15);
-  flash(0xFFFF, 10);
 
   int nextScen = ((int)game.level / 5) % 5;
   game.scenario = (Scenario)nextScen;
   game.nextBossLevel += 5;
 
-  if (finalCampaignBoss) {
-    wonThisGame=true;
-    save.campaignWon=true;
-    save.campaign50Won=true;
-    checkSkinUnlocks();
+  if (finalVictory) {
+    game.wonThisGame = true;
+    save.campaignWon = true;
     onGameOver();
+    game.state = GAME_OVER;
   }
 }
 
@@ -1559,20 +1763,19 @@ void onBossKilled() {
 // DESENHO - NAVE
 // =============================================================
 void drawPlayer() {
-  int x = (int)game.playerX + visualShakeX;
-  int y = (int)game.playerY + visualShakeY;
+  int x = (int)game.playerX;
+  int y = (int)game.playerY;
 
-  if (game.invulnerable && (gameNow() / 60) % 2 == 0) return;
+  if (game.invulnerable && (millis() / 60) % 2 == 0) return;
 
   const ShipInfo& ship = SHIPS[save.currentShip];
-  uint16_t cMain, cLight, cDark;
+  int sk = save.currentSkin;
+  if (sk < 0 || sk >= SKIN_COUNT) sk = 0;
+  const ShipPalette& pal = ship.palettes[sk];
+  uint16_t cMain = pal.cMain;
+  uint16_t cLight = pal.cLight;
+  uint16_t cDark = pal.cDark;
 
-  switch (save.currentSkin) {
-    case SKIN_CYAN:   cMain = 0x07FF; cLight = 0xBFFF; cDark = 0x0410; break;
-    case SKIN_GOLD:   cMain = 0xFE60; cLight = 0xFFF0; cDark = 0x8200; break;
-    case SKIN_PURPLE: cMain = 0x8010; cLight = 0xE81F; cDark = 0x4008; break;
-    default:          cMain = ship.cMain; cLight = ship.cLight; cDark = ship.cDark; break;
-  }
   if (game.shieldTimer > 0) cMain = C_POWERUP;
 
   if (game.dashTimer > 0) {
@@ -1585,8 +1788,10 @@ void drawPlayer() {
   }
 
   canvas.fillTriangle(x, y - 10, x - 9, y + 9, x + 9, y + 9, 0x0000);
-  canvas.fillTriangle(x - 5, y - 2, x - 12, y + 6, x - 5, y + 8, cDark);
-  canvas.fillTriangle(x + 5, y - 2, x + 12, y + 6, x + 5, y + 8, cDark);
+  canvas.fillTriangle(x - 5, y - 2, x - 14, y + 6, x - 5, y + 8, cDark);
+  canvas.fillTriangle(x + 5, y - 2, x + 14, y + 6, x + 5, y + 8, cDark);
+  canvas.drawPixel(x - 13, y + 5, cLight);
+  canvas.drawPixel(x + 13, y + 5, cLight);
   canvas.fillTriangle(x, y - 13, x - 10, y + 8, x + 10, y + 8, cMain);
   canvas.fillTriangle(x, y - 13, x - 5, y - 2, x + 5, y - 2, cLight);
   canvas.fillCircle(x, y - 3, 3, 0x001F);
@@ -1595,7 +1800,7 @@ void drawPlayer() {
   canvas.drawPixel(x - 7, y + 3, cLight);
   canvas.drawPixel(x + 7, y + 3, cLight);
 
-  int flameLen = 10 + ((gameNow() / 50) % 3) * 2;
+  int flameLen = 10 + ((millis() / 50) % 3) * 2;
   canvas.fillTriangle(x - 4, y + 8, x + 4, y + 8, x, y + 8 + flameLen, 0xFC00);
   canvas.fillTriangle(x - 2, y + 8, x + 2, y + 8, x, y + 6 + flameLen, 0xFFE0);
   canvas.fillTriangle(x - 1, y + 8, x + 1, y + 8, x, y + 4 + flameLen, 0xFFFF);
@@ -1618,7 +1823,7 @@ void drawPlayer() {
 // DESENHO - INIMIGOS
 // =============================================================
 void drawEnemy(Enemy &e) {
-  int x = (int)e.x + visualShakeX, y = (int)e.y + visualShakeY;
+  int x = (int)e.x, y = (int)e.y;
 
   if (e.type == 0) {
     canvas.fillTriangle(x, y + 9, x - 10, y - 7, x + 10, y - 7, 0xC000);
@@ -1653,7 +1858,7 @@ void drawEnemy(Enemy &e) {
     canvas.fillTriangle(x, y + 8, x - 10, y - 4, x + 10, y - 4, C_ENEMY4);
     canvas.fillRect(x - 2, y - 4, 4, 10, 0xFFFF);
     canvas.fillRect(x - 1, y + 4, 2, 4, 0xFFFF);
-    if ((gameNow() / 150) % 2 == 0) {
+    if ((millis() / 150) % 2 == 0) {
       canvas.fillCircle(x - 8, y - 2, 2, 0xF800);
       canvas.fillCircle(x + 8, y - 2, 2, 0xF800);
     } else {
@@ -1662,7 +1867,7 @@ void drawEnemy(Enemy &e) {
     }
   }
   else if (e.type == 4) {
-    uint16_t c = ((gameNow() / 100) % 2 == 0) ? 0xFC00 : 0xF800;
+    uint16_t c = ((millis() / 100) % 2 == 0) ? 0xFC00 : 0xF800;
     canvas.fillCircle(x, y, 11, c);
     canvas.fillCircle(x, y, 8, 0xFFE0);
     canvas.fillCircle(x, y, 5, 0xF800);
@@ -1675,7 +1880,7 @@ void drawEnemy(Enemy &e) {
     canvas.fillRoundRect(x - 12, y - 12, 24, 24, 4, C_ENEMY5);
     canvas.fillCircle(x, y, 6, 0x001F);
     canvas.fillCircle(x, y, 4, 0xFFFF);
-    canvas.drawCircle(x, y, 14, 0xFFFF);
+    canvas.drawCircle(x, y, 14, 0xFFFFFF);
     canvas.drawCircle(x, y, 13, 0x07FF);
     canvas.drawCircle(x, y, 12, 0x07FF);
   }
@@ -1685,7 +1890,7 @@ void drawEnemy(Enemy &e) {
     canvas.fillCircle(x, y - 2, 3, 0x0000);
     canvas.fillCircle(x, y - 2, 2, 0xF800);
     canvas.drawPixel(x, y - 2, 0xFFFF);
-    if ((gameNow() / 300) % 2 == 0) {
+    if ((millis() / 300) % 2 == 0) {
       canvas.drawLine(x, y + 8, (int)game.playerX, (int)game.playerY, 0x4000);
     }
   }
@@ -1717,7 +1922,7 @@ void drawEnemy(Enemy &e) {
 // =============================================================
 void drawBoss() {
   if (!boss.active) return;
-  int x = (int)boss.x + visualShakeX, y = (int)boss.y + visualShakeY;
+  int x = (int)boss.x, y = (int)boss.y;
 
   if (boss.shielded) {
     canvas.drawCircle(x, y, boss.w/2 + 8, 0x07FF);
@@ -1753,7 +1958,7 @@ void drawBoss() {
       uint16_t c = (boss.phase == 3) ? 0xFFFF : (boss.phase == 2) ? 0xF800 : 0xFD20;
       canvas.fillRoundRect(x - 40, y - 28, 80, 52, 10, 0x4000);
       canvas.fillRoundRect(x - 39, y - 27, 78, 50, 10, c);
-      int r = 12 + (int)(sinf(gameNow() / 200.0f) * 3);
+      int r = 12 + (int)(sinf(millis() / 200.0f) * 3);
       canvas.fillCircle(x, y - 3, r, 0xFFE0);
       canvas.fillCircle(x, y - 3, r - 4, 0xFFFF);
       canvas.fillCircle(x, y - 3, 3, 0x001F);
@@ -1777,7 +1982,7 @@ void drawBoss() {
         canvas.drawPixel(x - 22 + i * 5, y + 17, 0xFFFF);
       }
       if (!boss.shielded) {
-        float ang = gameNow() / 200.0f;
+        float ang = millis() / 200.0f;
         int arms = (boss.phase == 3) ? 6 : 4;
         for (int i = 0; i < arms; i++) {
           float a = ang + i * TWO_PI / arms;
@@ -1789,7 +1994,7 @@ void drawBoss() {
       break;
     }
     case BOSS_OMEGA: {
-      float ang = gameNow() / 300.0f;
+      float ang = millis() / 300.0f;
       for (int arm = 0; arm < 6; arm++) {
         float a = ang + arm * PI / 3;
         int ex = x + (int)(cosf(a) * 45);
@@ -1805,7 +2010,7 @@ void drawBoss() {
       break;
     }
     case BOSS_PHANTOM: {
-      uint16_t base = ((gameNow() / 100) % 2 == 0) ? 0x8010 : 0x4008;
+      uint16_t base = ((millis() / 100) % 2 == 0) ? 0x8010 : 0x4008;
       for (int i = 3; i >= 1; i--) {
         canvas.drawCircle(x, y, 25 * i, base);
       }
@@ -1816,7 +2021,7 @@ void drawBoss() {
       canvas.fillCircle(x - 8, y - 3, 3, 0x0000);
       canvas.fillCircle(x + 8, y - 3, 3, 0x0000);
       for (int i = 0; i < 8; i++) {
-        float a = gameNow() / 150.0f + i * PI / 4;
+        float a = millis() / 150.0f + i * PI / 4;
         int dx = x + (int)(cosf(a) * 30);
         int dy = y + (int)(sinf(a) * 30);
         canvas.drawPixel(dx, dy, 0xF81F);
@@ -1836,7 +2041,7 @@ void drawBoss() {
       canvas.fillCircle(x + 20, y - 5, 4, 0xF800);
       canvas.fillCircle(x - 20, y - 5, 2, 0xFFFF);
       canvas.fillCircle(x + 20, y - 5, 2, 0xFFFF);
-      if ((gameNow() / 200) % 2 == 0) {
+      if ((millis() / 200) % 2 == 0) {
         canvas.fillRect(x - 25, y - 25, 50, 3, 0xF800);
       }
       break;
@@ -1847,7 +2052,7 @@ void drawBoss() {
       canvas.fillTriangle(x, y - 30, x - 15, y - 5, x + 15, y - 5, 0xBFFF);
       canvas.fillTriangle(x, y + 10, x - 30, y + 10, x, y + 30, c);
       canvas.fillTriangle(x, y + 10, x + 30, y + 10, x, y + 30, c);
-      int r = 5 + (int)(sinf(gameNow() / 150.0f) * 3);
+      int r = 5 + (int)(sinf(millis() / 150.0f) * 3);
       canvas.fillCircle(x, y, r, 0xFFFF);
       canvas.drawLine(x, y - 30, x - 30, y + 10, 0xFFFF);
       canvas.drawLine(x, y - 30, x + 30, y + 10, 0xFFFF);
@@ -1880,7 +2085,7 @@ void drawBoss() {
         canvas.fillCircle(x, y, 6, 0xFFFF);
         canvas.fillCircle(x, y, 3, 0x0000);
       } else if (boss.phase == 2) {
-        float ang = gameNow() / 200.0f;
+        float ang = millis() / 200.0f;
         for (int i = 0; i < 8; i++) {
           float a = ang + i * PI / 4;
           int tx = x + (int)(cosf(a) * 40);
@@ -1893,7 +2098,7 @@ void drawBoss() {
         canvas.fillCircle(x, y, 8, 0xFFFF);
       } else {
         for (int i = 0; i < 12; i++) {
-          float a = gameNow() / 100.0f + i * PI / 6;
+          float a = millis() / 100.0f + i * PI / 6;
           int tx = x + (int)(cosf(a) * 45);
           int ty = y + (int)(sinf(a) * 45);
           canvas.drawLine(x, y, tx, ty, 0xF800);
@@ -1906,6 +2111,37 @@ void drawBoss() {
         canvas.fillCircle(x, y, 6, 0xFFFF);
       }
       break;
+    }
+  }
+}
+
+// =============================================================
+// DESENHO - PETS
+// =============================================================
+void drawPets() {
+  for (int i = 0; i < MAX_PETS; i++) {
+    if (!pets[i].active) continue;
+    int px = (int)pets[i].x;
+    int py = (int)pets[i].y;
+    const PetInfo& p = PETS[(int)pets[i].type];
+
+    canvas.fillCircle(px, py, 6, p.color);
+    canvas.drawCircle(px, py, 6, 0xFFFF);
+    canvas.fillCircle(px, py, 3, p.colorLight);
+    canvas.drawPixel(px, py - 2, 0xFFFF);
+
+    if (pets[i].type == PET_ORB) canvas.drawCircle(px, py, 8, p.color);
+    else if (pets[i].type == PET_HEALER) {
+      canvas.drawPixel(px, py - 4, 0xFFFF);
+      canvas.drawPixel(px - 1, py - 4, 0xFFFF);
+      canvas.drawPixel(px + 1, py - 4, 0xFFFF);
+    }
+    else if (pets[i].type == PET_COLLECTOR) {
+      canvas.drawPixel(px - 2, py + 2, 0xFFE0);
+      canvas.drawPixel(px + 2, py + 2, 0xFFE0);
+    }
+    else if (pets[i].type == PET_SHIELDER) {
+      canvas.drawCircle(px, py, 9, 0x07FF);
     }
   }
 }
@@ -1955,13 +2191,26 @@ void drawUI() {
   if (game.dashCooldown > 0) {
     canvas.drawRect(60, 24, 20, 4, C_DIM);
     int pct = 20 - (20 * game.dashCooldown / 90);
+    if (pct < 0) pct = 0;
     canvas.fillRect(60, 24, pct, 4, 0x07FF);
   } else {
     canvas.drawRect(60, 24, 20, 4, 0x07FF);
     canvas.fillRect(60, 24, 20, 4, 0x07FF);
   }
 
-  if (game.combo > 1 && gameNow() - game.lastKillTime < 1500) {
+  if (game.revivesLeft > 0) {
+    canvas.setTextColor(0x07FF, C_BG);
+    canvas.setCursor(90, 24);
+    canvas.printf("RV%d", game.revivesLeft);
+  }
+
+  if (game.bombsLeft > 0) {
+    canvas.setTextColor(C_ENEMY9, C_BG);
+    canvas.setCursor(115, 24);
+    canvas.printf("B%d", game.bombsLeft);
+  }
+
+  if (game.combo > 1 && millis() - game.lastKillTime < 1500) {
     int cx = SCREEN_W / 2 - 22;
     int cy = 88;
     canvas.fillRect(cx, cy, 44, 20, currentBgTint);
@@ -2002,29 +2251,123 @@ void drawUI() {
 // UPDATE - JOGADOR
 // =============================================================
 void updatePlayer() {
-  const ShipInfo& ship=SHIPS[save.currentShip];
-  const float SPEED=6.0f*ship.speed*(1.0f+save.upgradeLevels[UPG_SPEED]*0.08f);
-  float dx=0,dy=0;
-  bool dashing=(game.dashTimer>0);
-  if(dashing) {
-    dx=game.dashVX;dy=game.dashVY;
-    --game.dashTimer;
-  } else if(useAnalogMovement()) {
-    dx=(input.axisX/7.0f)*SPEED;
-    dy=(input.axisY/7.0f)*SPEED;
+  const ShipInfo& ship = SHIPS[save.currentShip];
+  float SPEED = 3.0f * ship.speed * (1.0f + save.upgradeLevels[UPG_SPEED] * 0.08f);
+  float dx = 0, dy = 0;
+
+  if (game.dashTimer > 0) {
+    dx = game.dashVX;
+    dy = game.dashVY;
+    game.dashTimer--;
+    if (game.dashTimer == 0) game.invulnerable = false;
   } else {
-    if(input.left) dx-=SPEED;
-    if(input.right) dx+=SPEED;
-    if(input.up) dy-=SPEED;
-    if(input.down) dy+=SPEED;
+    bool useAnalog = false;
+    switch (save.controlMode) {
+      case CTRL_DIGITAL:  useAnalog = false; break;
+      case CTRL_JOYSTICK: useAnalog = true;  break;
+      case CTRL_AUTO:
+      default: useAnalog = input.hasAnalog && !input.dpadActive; break;
+    }
+
+    if (useAnalog) {
+      float nx = input.axisX / 7.0f;
+      float ny = input.axisY / 7.0f;
+      float curveX = (nx >= 0 ? 1 : -1) * powf(fabsf(nx), 1.4f);
+      float curveY = (ny >= 0 ? 1 : -1) * powf(fabsf(ny), 1.4f);
+      dx = curveX * SPEED * 1.3f;
+      dy = curveY * SPEED * 1.3f;
+    } else {
+      if (input.up)    dy -= SPEED;
+      if (input.down)  dy += SPEED;
+      if (input.left)  dx -= SPEED;
+      if (input.right) dx += SPEED;
+    }
   }
-  float len=sqrtf(dx*dx+dy*dy);
-  float cap=dashing?12.0f:SPEED;
-  if(len>cap && len>0) {dx*=cap/len;dy*=cap/len;}
-  if(game.dashCooldown>0) --game.dashCooldown;
-  game.playerX=constrain(game.playerX+dx,(float)AREA_X+12,(float)AREA_X+AREA_W-12);
-  game.playerY=constrain(game.playerY+dy,(float)AREA_Y+12,(float)AREA_Y+AREA_H-12);
-  game.invulnerable=(game.dashTimer>0 || gameNow()<game.invulnerableUntil);
+
+  if (game.dashCooldown > 0) game.dashCooldown--;
+
+  game.playerX += dx;
+  game.playerY += dy;
+
+  if (game.playerX < AREA_X + 12) game.playerX = AREA_X + 12;
+  if (game.playerX > AREA_X + AREA_W - 12) game.playerX = AREA_X + AREA_W - 12;
+  if (game.playerY < AREA_Y + 12) game.playerY = AREA_Y + 12;
+  if (game.playerY > AREA_Y + AREA_H - 12) game.playerY = AREA_Y + AREA_H - 12;
+}
+
+// =============================================================
+// PETS
+// =============================================================
+void updatePets() {
+  for (int i = 0; i < MAX_PETS; i++) {
+    if (!pets[i].active) continue;
+
+    pets[i].angle += 0.03f;
+    float radius = 30.0f;
+    pets[i].x = game.playerX + cosf(pets[i].angle) * radius;
+    pets[i].y = game.playerY + sinf(pets[i].angle) * radius;
+
+    switch (pets[i].type) {
+      case PET_BLASTER: {
+        if (millis() - pets[i].lastShot > 500) {
+          pets[i].lastShot = millis();
+          for (int b = 0; b < MAX_BULLETS; b++) {
+            if (!bullets[b].active) {
+              bullets[b].x = pets[i].x;
+              bullets[b].y = pets[i].y;
+              bullets[b].vx = 0;
+              bullets[b].vy = -7;
+              bullets[b].dmg = 1;
+              bullets[b].pierce = 0;
+              bullets[b].guided = false;
+              bullets[b].crit = false;
+              bullets[b].hitMask = 0;
+              bullets[b].hitBoss = false;
+              bullets[b].ageFrames = 0;
+              bullets[b].color = 0x07FF;
+              bullets[b].colorLight = 0xBFFF;
+              bullets[b].active = true;
+              break;
+            }
+          }
+        }
+        break;
+      }
+      case PET_ORB: break;
+      case PET_HEALER: {
+        if (millis() - pets[i].lastSpecial > 30000) {
+          pets[i].lastSpecial = millis();
+          if (game.lives < game.maxLives) {
+            game.lives++;
+            spawnParticles(pets[i].x, pets[i].y, 8, 0x07E0);
+          }
+        }
+        break;
+      }
+      case PET_COLLECTOR: {
+        for (int c = 0; c < MAX_COINS; c++) {
+          if (!coins[c].active) continue;
+          float dx = pets[i].x - coins[c].x;
+          float dy = pets[i].y - coins[c].y;
+          float d = sqrtf(dx*dx + dy*dy);
+          if (d < 80 && d > 5) {
+            coins[c].x += (dx / d) * 2.0f;
+            coins[c].y += (dy / d) * 2.0f;
+          }
+        }
+        break;
+      }
+      case PET_SHIELDER: {
+        if (millis() - pets[i].lastSpecial > 20000) {
+          pets[i].lastSpecial = millis();
+          game.shieldTimer = game.maxShieldTimer / 2;
+          spawnParticles(pets[i].x, pets[i].y, 10, 0x8010);
+        }
+        break;
+      }
+      default: break;
+    }
+  }
 }
 
 // =============================================================
@@ -2032,7 +2375,6 @@ void updatePlayer() {
 // =============================================================
 void fireWeapon() {
   const WeaponInfo& w = WEAPONS[(int)game.weapon];
-  weaponsUsedMask |= (uint8_t)(1u << (int)game.weapon);
 
   switch (game.weapon) {
     case WPN_DEFAULT:
@@ -2070,9 +2412,11 @@ void fireWeapon() {
         bullets[idx1].vy = -6;
         bullets[idx1].dmg = w.dmg + save.upgradeLevels[UPG_DAMAGE];
         bullets[idx1].pierce = 0;
-        bullets[idx1].hitMask=0; bullets[idx1].hitBoss=false;
         bullets[idx1].guided = true;
-        bullets[idx1].weapon=WPN_MISSILE;
+        bullets[idx1].crit = false;
+        bullets[idx1].hitMask = 0;
+        bullets[idx1].hitBoss = false;
+        bullets[idx1].ageFrames = 0;
         bullets[idx1].color = w.color;
         bullets[idx1].colorLight = w.colorLight;
         bullets[idx1].active = true;
@@ -2084,9 +2428,11 @@ void fireWeapon() {
         bullets[idx2].vy = -6;
         bullets[idx2].dmg = w.dmg + save.upgradeLevels[UPG_DAMAGE];
         bullets[idx2].pierce = 0;
-        bullets[idx2].hitMask=0; bullets[idx2].hitBoss=false;
         bullets[idx2].guided = true;
-        bullets[idx2].weapon=WPN_MISSILE;
+        bullets[idx2].crit = false;
+        bullets[idx2].hitMask = 0;
+        bullets[idx2].hitBoss = false;
+        bullets[idx2].ageFrames = 0;
         bullets[idx2].color = w.color;
         bullets[idx2].colorLight = w.colorLight;
         bullets[idx2].active = true;
@@ -2094,21 +2440,29 @@ void fireWeapon() {
       break;
     }
   }
+
+  uint8_t oldMask = save.weaponsUsedMask;
+  save.weaponsUsedMask |= (uint8_t)(1u << (int)game.weapon);
+  if (save.weaponsUsedMask != oldMask) {
+    if ((save.weaponsUsedMask & ALL_WEAPONS_MASK) == ALL_WEAPONS_MASK) unlockAchv(ACHV_ALL_WEAPONS);
+    markSaveDirty();
+  }
 }
 
 void tryFire() {
   bool fire = input.cross || input.circle;
   int cd = WEAPONS[(int)game.weapon].cooldown - save.upgradeLevels[UPG_FIRERATE] * 15;
   if (cd < 80) cd = 80;
-  if (fire && gameNow() - game.lastFireTime > (unsigned long)cd) {
+  if (fire && millis() - game.lastFireTime > (unsigned long)cd) {
     fireWeapon();
-    game.lastFireTime = gameNow();
+    game.lastFireTime = millis();
   }
 }
 
 void updateBullets() {
   for (int i = 0; i < MAX_BULLETS; i++) {
     if (!bullets[i].active) continue;
+    if (++bullets[i].ageFrames > 240) { bullets[i].active = false; continue; }
 
     if (bullets[i].guided) {
       float bestD = 99999;
@@ -2170,22 +2524,22 @@ void updateEnemyBullets() {
 
     if (fabsf(enemyBullets[i].x - game.playerX) < 10 &&
         fabsf(enemyBullets[i].y - game.playerY) < 10) {
-      damagePlayer(enemyBullets[i].x, enemyBullets[i].y);
+      if (!game.invulnerable) {
+        damagePlayer(enemyBullets[i].x, enemyBullets[i].y);
+      }
       enemyBullets[i].active = false;
     }
   }
 }
 
 // =============================================================
-// INIMIGOS UPDATE
+// INIMIGOS
 // =============================================================
 void updateEnemies() {
-  if (game.state!=PLAYING) return;
   static float zigzagPhase = 0;
   zigzagPhase += 0.1f;
 
   for (int i = 0; i < MAX_ENEMIES; i++) {
-    if (game.state!=PLAYING) return;
     if (!enemies[i].active) continue;
     enemies[i].y += enemies[i].vy;
 
@@ -2197,7 +2551,7 @@ void updateEnemies() {
 
     if (enemies[i].type == 3) {
       if (enemies[i].y > AREA_Y + 40) enemies[i].vy = 0.2f;
-      if (gameNow() - enemies[i].lastShot > 1400 && random(0, 100) < 8) {
+      if (millis() - enemies[i].lastShot > 1400 && random(0, 100) < 8) {
         float dx = game.playerX - enemies[i].x;
         float dy = game.playerY - enemies[i].y;
         float d = sqrtf(dx*dx + dy*dy);
@@ -2205,7 +2559,7 @@ void updateEnemies() {
           float sp = 3.0f;
           spawnEnemyBullet(enemies[i].x, enemies[i].y + 8, dx/d*sp, dy/d*sp);
         }
-        enemies[i].lastShot = gameNow();
+        enemies[i].lastShot = millis();
       }
     }
 
@@ -2221,14 +2575,14 @@ void updateEnemies() {
 
     if (enemies[i].type == 6) {
       if (enemies[i].y > AREA_Y + 50) enemies[i].vy = 0.1f;
-      if (gameNow() - enemies[i].lastShot > 2200) {
+      if (millis() - enemies[i].lastShot > 2200) {
         float dx = game.playerX - enemies[i].x;
         float dy = game.playerY - enemies[i].y;
         float d = sqrtf(dx*dx + dy*dy);
         if (d > 5) {
           spawnEnemyBullet(enemies[i].x, enemies[i].y + 10, dx/d*4.5f, dy/d*4.5f);
         }
-        enemies[i].lastShot = gameNow();
+        enemies[i].lastShot = millis();
       }
     }
 
@@ -2236,8 +2590,8 @@ void updateEnemies() {
       if (enemies[i].y > AREA_Y + 30) enemies[i].vy = 0.3f;
       if (enemies[i].specialTimer > 0) enemies[i].specialTimer--;
 
-      if (gameNow() - enemies[i].lastSpecial > 2500) {
-        enemies[i].lastSpecial = gameNow();
+      if (millis() - enemies[i].lastSpecial > 2500) {
+        enemies[i].lastSpecial = millis();
         enemies[i].specialTimer = 30;
         int healed = 0;
         for (int k = 0; k < MAX_ENEMIES && healed < 3; k++) {
@@ -2259,7 +2613,9 @@ void updateEnemies() {
     float dyp = enemies[i].y - game.playerY;
     if (fabsf(dxp) < (enemies[i].w/2 + game.playerW/2 - 4) &&
         fabsf(dyp) < (enemies[i].h/2 + game.playerH/2 - 4)) {
-      damagePlayer(game.playerX, game.playerY);
+      if (!game.invulnerable) {
+        damagePlayer(game.playerX, game.playerY);
+      }
       enemies[i].active = false;
       spawnExplosion(enemies[i].x, enemies[i].y, 1);
       continue;
@@ -2277,7 +2633,7 @@ void updateEnemies() {
 // =============================================================
 void checkBulletHits() {
   for (int b = 0; b < MAX_BULLETS; b++) {
-    if (game.state!=PLAYING) return; // Game Over impede pontuacao apos salvar
+    if (game.state != PLAYING) return;
     if (!bullets[b].active) continue;
 
     if (boss.active && !bullets[b].hitBoss) {
@@ -2303,16 +2659,13 @@ void checkBulletHits() {
     }
 
     for (int e = 0; e < MAX_ENEMIES; e++) {
-      if (!enemies[e].active || (bullets[b].hitMask & (1UL<<e))) continue;
+      if (!enemies[e].active || (bullets[b].hitMask & (1UL << e))) continue;
       float dx = bullets[b].x - enemies[e].x;
       float dy = bullets[b].y - enemies[e].y;
       if (fabsf(dx) < enemies[e].w/2 && fabsf(dy) < enemies[e].h/2) {
         bullets[b].hitMask |= (1UL << e);
 
         if (enemies[e].type == 5) {
-          // Nave atira de baixo para cima: o impacto frontal ocorre na metade
-          // INFERIOR do inimigo. A condicao anterior (<) fazia este tipo
-          // ignorar todos os tiros comuns, tornando-o praticamente invencivel.
           if (bullets[b].vy < 0 && bullets[b].y > enemies[e].y) {
             enemies[e].hp -= bullets[b].dmg;
           } else {
@@ -2336,7 +2689,7 @@ void checkBulletHits() {
                     (enemies[e].type == 6) ? 70 :
                     (enemies[e].type == 7) ? 90 : 120;
 
-          unsigned long now = gameNow();
+          unsigned long now = millis();
           if (now - game.lastKillTime < 1500) {
             if (game.combo < 15) game.combo++;
             if (game.combo > game.maxCombo) game.maxCombo = game.combo;
@@ -2373,8 +2726,8 @@ void checkBulletHits() {
                   enemies[n].y = enemies[e].y;
                   enemies[n].vy = 2.0f;
                   enemies[n].vx = 0;
-                  enemies[n].lastShot = gameNow();
-                  enemies[n].lastSpecial = gameNow();
+                  enemies[n].lastShot = millis();
+                  enemies[n].lastSpecial = millis();
                   enemies[n].specialTimer = 0;
                   enemies[n].active = true;
                   break;
@@ -2386,6 +2739,43 @@ void checkBulletHits() {
           enemies[e].active = false;
         }
         if (!bullets[b].active) break;
+      }
+    }
+  }
+
+  for (int p = 0; p < MAX_PETS; p++) {
+    if (!pets[p].active || pets[p].type != PET_ORB) continue;
+
+    for (int e = 0; e < MAX_ENEMIES; e++) {
+      if (!enemies[e].active) continue;
+      float dx = pets[p].x - enemies[e].x;
+      float dy = pets[p].y - enemies[e].y;
+      if (fabsf(dx) < enemies[e].w/2 + 6 && fabsf(dy) < enemies[e].h/2 + 6) {
+        if (millis() % 100 < 20) {
+          enemies[e].hp -= 1;
+          spawnParticles(enemies[e].x, enemies[e].y, 2, 0xF81F);
+
+          if (enemies[e].hp <= 0) {
+            game.score += 15;
+            game.enemiesKilled++;
+            save.totalKills++;
+            spawnExplosion(enemies[e].x, enemies[e].y, 1);
+            if (random(0, 100) < 30) spawnCoin(enemies[e].x, enemies[e].y, 1);
+            enemies[e].active = false;
+          }
+        }
+      }
+    }
+
+    if (boss.active) {
+      float dx = pets[p].x - boss.x;
+      float dy = pets[p].y - boss.y;
+      if (fabsf(dx) < boss.w/2 + 6 && fabsf(dy) < boss.h/2 + 6) {
+        if (millis() % 150 < 20) {
+          boss.hp -= 1;
+          spawnParticles(pets[p].x, pets[p].y, 3, 0xF81F);
+          if (boss.hp <= 0) onBossKilled();
+        }
       }
     }
   }
@@ -2420,7 +2810,7 @@ void updatePowerUps() {
       if (powerups[i].type == 0) {
         game.shieldTimer = game.maxShieldTimer;
       } else if (powerups[i].type == 1) {
-        if (game.lives < 9) game.lives++;
+        if (game.lives < game.maxLives) game.lives++;
       } else {
         game.weapon = (WeaponType)(powerups[i].type - 1);
         game.weaponTimer = 900;
@@ -2437,6 +2827,7 @@ void updatePowerUps() {
 // COINS
 // =============================================================
 void updateCoins() {
+  int magnetRange = 60 + save.upgradeLevels[UPG_COIN_MAGNET] * 20;
   for (int i = 0; i < MAX_COINS; i++) {
     if (!coins[i].active) continue;
     coins[i].y += coins[i].vy;
@@ -2451,7 +2842,7 @@ void updateCoins() {
     float dx = coins[i].x - game.playerX;
     float dy = coins[i].y - game.playerY;
     float d = sqrtf(dx*dx + dy*dy);
-    if (d < 60 && d > 5) {
+    if (d < magnetRange && d > 5) {
       coins[i].x -= (dx / d) * 2.5f;
       coins[i].y -= (dy / d) * 2.5f;
     }
@@ -2466,10 +2857,9 @@ void updateCoins() {
 }
 
 // =============================================================
-// TIMERS / DIFICULDADE
+// TIMERS
 // =============================================================
 void updateTimers() {
-  checkAchievements();
   if (game.shieldTimer > 0) game.shieldTimer--;
   if (game.weaponTimer > 0) {
     game.weaponTimer--;
@@ -2478,23 +2868,30 @@ void updateTimers() {
     }
   }
 
-  int ptsPerLevel = 600;
-  int maxLevel = (game.mode == MODE_CAMPAIGN) ? 50 : 999;
-  int newLevel = 1 + game.score / ptsPerLevel;
-  if (newLevel > maxLevel) newLevel = maxLevel;
+  unsigned long levelDuration = 20000;
+  unsigned long elapsed = millis() - game.levelStartTime;
 
-  if (newLevel > game.level) {
-    if (!game.tookDamageThisLevel) {
+  int maxLevel = (game.mode == MODE_CAMPAIGN) ? 50 : 999;
+  int timeLevel = game.level + (int)(elapsed / levelDuration);
+  if (timeLevel > maxLevel) timeLevel = maxLevel;
+
+  if (timeLevel > game.level) {
+    if (!game.tookDamageThisLevel && game.level >= 1) {
       unlockAchv(ACHV_NO_HIT_LEVEL);
-      game.levelAtLastNoHit=game.level;
     }
-    game.level = newLevel;
-    if (game.enemySpawnInterval > 300) game.enemySpawnInterval -= 40;
+
+    game.level = timeLevel;
+    game.levelStartTime = millis();
+    if (game.enemySpawnInterval > 300) game.enemySpawnInterval -= 30;
     if (game.fireCooldown > 90)       game.fireCooldown       -= 5;
     game.tookDamageThisLevel = false;
+
+    if (save.upgradeLevels[UPG_START_BOMB] > 0) {
+      game.bombsLeft = save.upgradeLevels[UPG_START_BOMB];
+    }
   }
 
-  if (!boss.active && game.level >= game.nextBossLevel && gameNow()>=bossCooldownUntil) {
+  if (!boss.active && game.level >= game.nextBossLevel) {
     for (int i = 0; i < MAX_ENEMIES; i++) enemies[i].active = false;
     for (int i = 0; i < MAX_ENEMY_BULLS; i++) enemyBullets[i].active = false;
 
@@ -2502,9 +2899,9 @@ void updateTimers() {
     spawnBoss((BossType)idx);
   }
 
-  if (!boss.active && gameNow() - game.lastEnemySpawn > game.enemySpawnInterval) {
+  if (!boss.active && millis() - game.lastEnemySpawn > game.enemySpawnInterval) {
     spawnEnemy();
-    game.lastEnemySpawn = gameNow();
+    game.lastEnemySpawn = millis();
   }
 }
 
@@ -2525,19 +2922,23 @@ void drawPixelArtShipFullscreen(int shipType, int frame) {
   int offset = (frame % 30) - 15;
   cy += offset / 3;
 
+  if (shipType < 0 || shipType >= SHIP_COUNT) shipType = 0;
   const ShipInfo& ship = SHIPS[shipType];
+  int sk = save.currentSkin;
+  if (sk < 0 || sk >= SKIN_COUNT) sk = 0;
+  const ShipPalette& pal = ship.palettes[sk];
 
   canvas.fillTriangle(cx + 4, cy - 40, cx - 40, cy + 50, cx + 40, cy + 50, 0x0000);
-  canvas.fillTriangle(cx - 20, cy - 10, cx - 55, cy + 30, cx - 20, cy + 40, ship.cDark);
-  canvas.fillTriangle(cx + 20, cy - 10, cx + 55, cy + 30, cx + 20, cy + 40, ship.cDark);
-  canvas.fillTriangle(cx, cy - 60, cx - 40, cy + 40, cx + 40, cy + 40, ship.cMain);
-  canvas.fillTriangle(cx, cy - 60, cx - 20, cy - 10, cx + 20, cy - 10, ship.cLight);
+  canvas.fillTriangle(cx - 20, cy - 10, cx - 55, cy + 30, cx - 20, cy + 40, pal.cDark);
+  canvas.fillTriangle(cx + 20, cy - 10, cx + 55, cy + 30, cx + 20, cy + 40, pal.cDark);
+  canvas.fillTriangle(cx, cy - 60, cx - 40, cy + 40, cx + 40, cy + 40, pal.cMain);
+  canvas.fillTriangle(cx, cy - 60, cx - 20, cy - 10, cx + 20, cy - 10, pal.cLight);
   canvas.fillCircle(cx, cy - 15, 12, 0x001F);
   canvas.fillCircle(cx, cy - 15, 8, 0x07FF);
   canvas.fillCircle(cx, cy - 15, 4, 0xFFFF);
   canvas.drawPixel(cx - 3, cy - 20, 0xFFFF);
-  canvas.fillRect(cx - 30, cy + 15, 8, 12, ship.cLight);
-  canvas.fillRect(cx + 22, cy + 15, 8, 12, ship.cLight);
+  canvas.fillRect(cx - 30, cy + 15, 8, 12, pal.cLight);
+  canvas.fillRect(cx + 22, cy + 15, 8, 12, pal.cLight);
   canvas.drawPixel(cx - 40, cy + 20, 0xFFFF);
   canvas.drawPixel(cx + 40, cy + 20, 0xFFFF);
 
@@ -2557,39 +2958,34 @@ void drawPixelArtShipFullscreen(int shipType, int frame) {
 void drawTransition() {
   int t = (int)game.stateTimer;
 
-  if (t < 10) {
+  if (t < 20) {
     canvas.fillSprite(0x0000);
     drawPixelArtShipFullscreen(save.currentShip, t * 3);
-  } else if (t < 38) {
+  } else if (t < 70) {
     drawPixelArtShipFullscreen(save.currentShip, t);
     canvas.setTextColor(0xFFFF, 0x0000);
     canvas.setTextSize(1);
     canvas.setCursor(SCREEN_W / 2 - 40, SCREEN_H - 25);
-    if (game.level == 1) {
-      canvas.print("PREPARE-SE");
-    } else if (game.level >= game.nextBossLevel - 5) {
-      canvas.print("WARNING: BOSS!");
-    } else {
-      canvas.print("NOVA AREA");
-    }
-  } else if (t < 46) {
+    if (game.level == 1) canvas.print("PREPARE-SE");
+    else if (game.level >= game.nextBossLevel - 5) canvas.print("WARNING: BOSS!");
+    else canvas.print("NOVA AREA");
+  } else if (t < 90) {
     canvas.fillSprite(0x0000);
   } else {
     game.state = PLAYING;
     game.stateTimer = 0;
   }
-  if(game.state==TRANSITION) ++game.stateTimer;
+  game.stateTimer++;
 }
 
 // =============================================================
 // RENDER
 // =============================================================
 void render() {
-  visualShakeX = 0; visualShakeY = 0;
-  if (game.shakeTimer > 0 && (game.state==PLAYING || game.state==PAUSED)) {
-    int radius = constrain(game.shakeAmount,0,5); // nunca desloca o framebuffer SPI
-    visualShakeX=random(-radius,radius+1);
-    visualShakeY=random(-radius,radius+1);
+  int shakeX = 0, shakeY = 0;
+  if (game.shakeTimer > 0) {
+    shakeX = (random(-game.shakeAmount, game.shakeAmount + 1));
+    shakeY = (random(-game.shakeAmount, game.shakeAmount + 1));
     game.shakeTimer--;
     if (game.shakeTimer == 0) game.shakeAmount = 0;
   }
@@ -2605,7 +3001,6 @@ void render() {
     canvas.fillCircle(px, py, rad, particles[i].color);
   }
 
-  // Coins
   for (int i = 0; i < MAX_COINS; i++) {
     if (!coins[i].active) continue;
     int px = (int)coins[i].x, py = (int)coins[i].y;
@@ -2617,7 +3012,6 @@ void render() {
     canvas.drawPixel(px, py - 2, 0xFFFF);
   }
 
-  // Power-ups
   for (int i = 0; i < MAX_POWERUPS; i++) {
     if (!powerups[i].active) continue;
     int px = (int)powerups[i].x, py = (int)powerups[i].y;
@@ -2663,9 +3057,9 @@ void render() {
 
   for (int i = 0; i < MAX_BULLETS; i++) {
     if (!bullets[i].active) continue;
-    int bx = (int)bullets[i].x+visualShakeX, by = (int)bullets[i].y+visualShakeY;
+    int bx = (int)bullets[i].x, by = (int)bullets[i].y;
 
-    if (bullets[i].weapon == WPN_LASER) {
+    if (bullets[i].pierce > 0 && !bullets[i].guided) {
       canvas.fillRect(bx - 1, by - 8, 3, 16, bullets[i].color);
       canvas.drawRect(bx - 1, by - 8, 3, 16, bullets[i].colorLight);
       canvas.drawPixel(bx, by - 9, 0xFFFF);
@@ -2677,49 +3071,54 @@ void render() {
       canvas.drawPixel(bx, by - 5, bullets[i].colorLight);
       canvas.drawPixel(bx, by - 3, 0xFFFF);
     }
+
+    if (bullets[i].crit) {
+      canvas.drawPixel(bx - 2, by, 0xFFFF);
+      canvas.drawPixel(bx + 2, by, 0xFFFF);
+    }
   }
 
   for (int i = 0; i < MAX_ENEMY_BULLS; i++) {
     if (!enemyBullets[i].active) continue;
-    int bx = (int)enemyBullets[i].x+visualShakeX, by = (int)enemyBullets[i].y+visualShakeY;
+    int bx = (int)enemyBullets[i].x, by = (int)enemyBullets[i].y;
     canvas.fillCircle(bx, by, 3, 0xF800);
     canvas.fillCircle(bx, by, 2, 0xFFE0);
     canvas.drawPixel(bx, by, 0xFFFF);
   }
 
-  if (game.state == PLAYING || game.state == PAUSED) drawPlayer();
+  if (game.state == PLAYING || game.state == PAUSED) {
+    drawPets();
+    drawPlayer();
+  }
 
   drawUI();
 
-  if (game.flashTimer > 0) {
-    // Hit flash de borda: nao apaga o quadro todo por varios frames.
-    for(int k=0;k<3;k++) canvas.drawRect(k,k,SCREEN_W-2*k,SCREEN_H-2*k,game.flashColor);
-    --game.flashTimer;
-  }
-
-  if (achvPopup.active) {
-    int t = achvPopup.timer;
+  if (popup.active) {
+    int t = popup.timer;
     int y = 40;
     if (t > 220) y = 40 - (240 - t) * 2;
     else if (t < 20) y = 40 + (20 - t) * 2;
 
-    canvas.fillRect(20, y, SCREEN_W - 40, 32, 0x0000);
-    canvas.drawRect(20, y, SCREEN_W - 40, 32, C_COIN);
-    canvas.drawRect(21, y + 1, SCREEN_W - 42, 30, C_COIN);
+    const uint16_t borderCol = C_COIN;
+    const uint16_t textCol = C_COIN;
 
-    canvas.setTextColor(C_COIN, 0x0000);
+    canvas.fillRect(20, y, SCREEN_W - 40, 32, 0x0000);
+    canvas.drawRect(20, y, SCREEN_W - 40, 32, borderCol);
+    canvas.drawRect(21, y + 1, SCREEN_W - 42, 30, borderCol);
+
+    canvas.setTextColor(textCol, 0x0000);
     canvas.setTextSize(1);
     canvas.setCursor(28, y + 6);
     canvas.print("ACHIEVEMENT!");
     canvas.setTextColor(0xFFFF, 0x0000);
     canvas.setCursor(28, y + 18);
-    canvas.print(ACHIEVEMENTS[achvPopup.idx].name);
-    canvas.setTextColor(C_COIN, 0x0000);
+    canvas.print(ACHIEVEMENTS[popup.idx].name);
+    canvas.setTextColor(textCol, 0x0000);
     canvas.setCursor(SCREEN_W - 65, y + 18);
-    canvas.printf("+%d$", ACHIEVEMENTS[achvPopup.idx].reward);
+    canvas.printf("+%d$", ACHIEVEMENTS[popup.idx].reward);
 
-    achvPopup.timer--;
-    if (achvPopup.timer <= 0) achvPopup.active = false;
+    popup.timer--;
+    if (popup.timer <= 0) popup.active = false;
   }
 
   // ===== MENU =====
@@ -2732,11 +3131,15 @@ void render() {
 
     int cx = 255, cy = 130;
     const ShipInfo& ship = SHIPS[save.currentShip];
+    int sk = save.currentSkin;
+    if (sk < 0 || sk >= SKIN_COUNT) sk = 0;
+    const ShipPalette& pal = ship.palettes[sk];
+
     canvas.fillTriangle(cx + 4, cy - 30, cx - 30, cy + 40, cx + 30, cy + 40, 0x0000);
-    canvas.fillTriangle(cx - 15, cy - 5, cx - 40, cy + 25, cx - 15, cy + 30, ship.cDark);
-    canvas.fillTriangle(cx + 15, cy - 5, cx + 40, cy + 25, cx + 15, cy + 30, ship.cDark);
-    canvas.fillTriangle(cx, cy - 50, cx - 30, cy + 30, cx + 30, cy + 30, ship.cMain);
-    canvas.fillTriangle(cx, cy - 50, cx - 15, cy - 5, cx + 15, cy - 5, ship.cLight);
+    canvas.fillTriangle(cx - 15, cy - 5, cx - 40, cy + 25, cx - 15, cy + 30, pal.cDark);
+    canvas.fillTriangle(cx + 15, cy - 5, cx + 40, cy + 25, cx + 15, cy + 30, pal.cDark);
+    canvas.fillTriangle(cx, cy - 50, cx - 30, cy + 30, cx + 30, cy + 30, pal.cMain);
+    canvas.fillTriangle(cx, cy - 50, cx - 15, cy - 5, cx + 15, cy - 5, pal.cLight);
     canvas.fillCircle(cx, cy - 12, 8, 0x001F);
     canvas.fillCircle(cx, cy - 12, 5, 0x07FF);
     canvas.fillCircle(cx, cy - 12, 2, 0xFFFF);
@@ -2781,7 +3184,7 @@ void render() {
       if (i == 1) {
         canvas.setCursor(115, y);
         canvas.setTextColor(0x8410, sel ? C_HIGHLIGHT : C_BG);
-        canvas.printf("%s", skinMenuNames[save.currentSkin]);
+        canvas.printf("%s", skinNames[save.currentSkin]);
       }
       if (i == 2) {
         canvas.setCursor(115, y);
@@ -2791,8 +3194,11 @@ void render() {
     }
 
     canvas.setTextColor(C_DIM, C_BG);
+    canvas.setTextSize(1);
+    canvas.setCursor(SCREEN_W - 38, SCREEN_H - 12);
+    canvas.print(GAME_VERSION);
+
     canvas.setCursor(60, SCREEN_H - 12); canvas.print("UP/DOWN  CROSS=OK");
-    canvas.setTextColor(C_DIM,C_BG);canvas.setCursor(SCREEN_W-49,SCREEN_H-12);canvas.print(GAME_VERSION);
   }
 
   // ===== MODE SELECT =====
@@ -2829,21 +3235,18 @@ void render() {
   if (game.state == SKIN_SELECT) {
     canvas.setTextColor(C_PLAYER, C_BG);
     canvas.setTextSize(2);
-    canvas.setCursor(85, 15); canvas.print("SKINS");
+    canvas.setCursor(85, 15); canvas.print("PALETA");
+
+    const ShipInfo& ship = SHIPS[save.currentShip];
 
     for (int i = 0; i < SKIN_COUNT; i++) {
       int y = 55 + i * 38;
       bool sel = (i == skinSelection);
-      bool unl = skinUnlocked(i);
-
-      uint16_t c = 0x8410;
-      if (i == SKIN_DEFAULT) c = 0x07E0;
-      else if (i == SKIN_CYAN) c = 0x07FF;
-      else if (i == SKIN_GOLD) c = 0xFE60;
-      else if (i == SKIN_PURPLE) c = 0x8010;
+      const ShipPalette& pal = ship.palettes[i];
 
       int px = 40, py = y + 12;
-      canvas.fillTriangle(px, py - 10, px - 8, py + 8, px + 8, py + 8, c);
+      canvas.fillTriangle(px, py - 10, px - 8, py + 8, px + 8, py + 8, pal.cMain);
+      canvas.fillTriangle(px, py - 10, px - 4, py - 2, px + 4, py - 2, pal.cLight);
       canvas.fillCircle(px, py - 2, 2, 0xFFFF);
 
       if (sel) {
@@ -2853,22 +3256,16 @@ void render() {
           canvas.setTextSize(2);
           canvas.print(">");
         }
-        canvas.drawRect(64, y - 4, 220, 26, unl ? C_BULLET : 0x4000);
+        canvas.drawRect(64, y - 4, 220, 26, C_BULLET);
       }
 
       canvas.setTextSize(2);
-      canvas.setTextColor(unl ? 0xFFFF : 0x4208, C_BG);
+      canvas.setTextColor(0xFFFF, C_BG);
       canvas.setCursor(75, y);
-      canvas.print(skinMenuNames[i]);
+      canvas.print(skinNames[i]);
 
       canvas.setTextSize(1);
-      if (!unl) {
-        canvas.setTextColor(0xF800, C_BG);
-        canvas.setCursor(75, y + 18);
-        if (i == SKIN_CYAN) canvas.print("Req: 5000 pts acum.");
-        else if (i == SKIN_GOLD) canvas.print("Req: vencer campanha");
-        else if (i == SKIN_PURPLE) canvas.print("Req: 20000 pts acum.");
-      } else if (i == save.currentSkin) {
+      if (i == save.currentSkin) {
         canvas.setTextColor(0x07E0, C_BG);
         canvas.setCursor(75, y + 18);
         canvas.print("<< ATIVA >>");
@@ -2898,10 +3295,11 @@ void render() {
       bool sel = (i == shipSelection);
       bool unl = shipUnlocked(i);
       const ShipInfo& sh = SHIPS[i];
+      const ShipPalette& pal = sh.palettes[0];
 
       int px = 40, py = y + 16;
-      canvas.fillTriangle(px, py - 12, px - 10, py + 10, px + 10, py + 10, sh.cMain);
-      canvas.fillTriangle(px, py - 12, px - 5, py - 2, px + 5, py - 2, sh.cLight);
+      canvas.fillTriangle(px, py - 12, px - 10, py + 10, px + 10, py + 10, pal.cMain);
+      canvas.fillTriangle(px, py - 12, px - 5, py - 2, px + 5, py - 2, pal.cLight);
       canvas.fillCircle(px, py - 3, 2, 0xFFFF);
 
       if (sel) canvas.drawRect(60, y - 3, 240, 32, unl ? C_BULLET : 0x4000);
@@ -2960,10 +3358,11 @@ void render() {
         bool sel = (i == shopIndex);
         bool unl = shipUnlocked(i);
         const ShipInfo& sh = SHIPS[i];
+        const ShipPalette& pal = sh.palettes[0];
 
         int px = 30, py = y + 13;
-        canvas.fillTriangle(px, py - 10, px - 8, py + 8, px + 8, py + 8, sh.cMain);
-        canvas.fillTriangle(px, py - 10, px - 4, py - 1, px + 4, py - 1, sh.cLight);
+        canvas.fillTriangle(px, py - 10, px - 8, py + 8, px + 8, py + 8, pal.cMain);
+        canvas.fillTriangle(px, py - 10, px - 4, py - 1, px + 4, py - 1, pal.cLight);
 
         if (sel) {
           canvas.fillRect(48, y - 2, SCREEN_W - 55, 26, C_HIGHLIGHT);
@@ -2987,34 +3386,42 @@ void render() {
         }
       }
     } else {
-      for (int i = 0; i < UPG_COUNT; i++) {
-        int y = 42 + i * 26;
+      int startIdx = shopScroll;
+      if (startIdx < 0) startIdx = 0;
+      if (startIdx > UPG_COUNT - 9) startIdx = UPG_COUNT - 9;
+      if (startIdx < 0) startIdx = 0;
+
+      for (int j = 0; j < 9; j++) {
+        int i = startIdx + j;
+        if (i >= UPG_COUNT) break;
+
+        int y = 42 + j * 20;
         bool sel = (i == shopIndex);
         const UpgradeInfo& u = UPGRADES[i];
         int lvl = save.upgradeLevels[i];
         bool maxed = (lvl >= u.maxLevel);
 
         if (sel) {
-          canvas.fillRect(10, y - 2, SCREEN_W - 20, 22, C_HIGHLIGHT);
-          canvas.drawRect(10, y - 2, SCREEN_W - 20, 22, C_BULLET);
+          canvas.fillRect(8, y - 2, SCREEN_W - 16, 18, C_HIGHLIGHT);
+          canvas.drawRect(8, y - 2, SCREEN_W - 16, 18, C_BULLET);
         }
 
         canvas.setTextColor(0xFFFF, sel ? C_HIGHLIGHT : C_BG);
-        canvas.setCursor(18, y);
+        canvas.setCursor(14, y);
         canvas.print(u.name);
 
         canvas.setTextColor(0x8410, sel ? C_HIGHLIGHT : C_BG);
-        canvas.setCursor(18, y + 10);
+        canvas.setCursor(14, y + 9);
         canvas.print(u.desc);
 
         canvas.setTextColor(C_BULLET, sel ? C_HIGHLIGHT : C_BG);
-        canvas.setCursor(180, y + 5);
-        for (int k = 0; k < u.maxLevel; k++) {
+        canvas.setCursor(180, y + 4);
+        for (int k = 0; k < u.maxLevel && k < 5; k++) {
           uint16_t c = (k < lvl) ? 0x07E0 : 0x4208;
-          canvas.fillRect(180 + k * 10, y + 5, 8, 8, c);
+          canvas.fillRect(180 + k * 8, y + 4, 6, 6, c);
         }
 
-        canvas.setCursor(SCREEN_W - 60, y + 5);
+        canvas.setCursor(SCREEN_W - 55, y + 4);
         if (maxed) {
           canvas.setTextColor(0x07E0, sel ? C_HIGHLIGHT : C_BG);
           canvas.print("MAX");
@@ -3026,8 +3433,62 @@ void render() {
       }
     }
 
+    canvas.setTextColor(0x4208, C_BG);
+    canvas.setCursor(20, 232);
+    canvas.print("? ? ? ? ? ? ? ? ? ?");
+
     canvas.setTextColor(C_DIM, C_BG);
-    canvas.setCursor(30, 220); canvas.print("L/R tabs | CROSS=comprar");
+    canvas.setCursor(20, 222); canvas.print("L/R tabs  UP/DOWN  CROSS=OK");
+  }
+
+  // ===== PET SHOP =====
+  if (game.state == PET_SHOP) {
+    canvas.setTextColor(C_PLAYER, C_BG);
+    canvas.setTextSize(2);
+    canvas.setCursor(120, 5); canvas.print("PETS");
+    canvas.setTextSize(1);
+    canvas.setTextColor(C_COIN, C_BG);
+    canvas.setCursor(SCREEN_W - 60, 10);
+    canvas.printf("$ %d", save.coins);
+
+    for (int i = 0; i < PET_COUNT; i++) {
+      int y = 30 + i * 36;
+      bool sel = (i == petSelection);
+      bool unl = petUnlocked(i);
+      const PetInfo& pi = PETS[i];
+
+      int px = 25, py = y + 15;
+      canvas.fillCircle(px, py, 8, pi.color);
+      canvas.drawCircle(px, py, 8, 0xFFFF);
+      canvas.fillCircle(px, py, 4, pi.colorLight);
+      canvas.drawPixel(px, py - 2, 0xFFFF);
+
+      if (sel) {
+        canvas.fillRect(45, y - 2, SCREEN_W - 52, 32, C_HIGHLIGHT);
+        canvas.drawRect(45, y - 2, SCREEN_W - 52, 32, C_BULLET);
+      }
+
+      canvas.setTextColor(0xFFFF, sel ? C_HIGHLIGHT : C_BG);
+      canvas.setCursor(52, y + 2);
+      canvas.print(pi.name);
+
+      canvas.setTextColor(0x8410, sel ? C_HIGHLIGHT : C_BG);
+      canvas.setCursor(52, y + 14);
+      canvas.print(pi.desc);
+
+      canvas.setCursor(SCREEN_W - 65, y + 8);
+      if (unl) {
+        canvas.setTextColor(0x07E0, sel ? C_HIGHLIGHT : C_BG);
+        canvas.print("OK");
+      } else {
+        canvas.setTextColor(C_COIN, sel ? C_HIGHLIGHT : C_BG);
+        canvas.printf("$%d", pi.cost);
+      }
+    }
+
+    canvas.setTextColor(C_DIM, C_BG);
+    canvas.setCursor(50, 222);
+    canvas.print("CROSS=comprar  SELECT=voltar");
   }
 
   // ===== ACHIEVEMENTS =====
@@ -3044,6 +3505,7 @@ void render() {
     canvas.printf("%d/%d", unlocked, ACHV_COUNT);
 
     int startIdx = shopScroll;
+    if (startIdx < 0) startIdx = 0;
     for (int j = 0; j < 12; j++) {
       int i = startIdx + j;
       if (i >= ACHV_COUNT) break;
@@ -3147,8 +3609,8 @@ void render() {
     unsigned long totalHr = totalMin / 60;
     totalMin = totalMin % 60;
 
-    int y = 30;
-    const int line = 12;
+    int y = 28;
+    const int line = 11;
 
     canvas.setCursor(10, y); canvas.print("HIGH SCORE:        "); canvas.printf("%d", save.highScore); y += line;
     canvas.setCursor(10, y); canvas.print("PARTIDAS:          "); canvas.printf("%d", save.gamesPlayed); y += line;
@@ -3177,19 +3639,19 @@ void render() {
     for (int i = 0; i < SHIP_COUNT; i++) if (shipUnlocked(i)) shipCount++;
     canvas.printf("%d/%d", shipCount, SHIP_COUNT); y += line;
 
-    canvas.setCursor(10, y); canvas.print("SKINS:             ");
-    int skinCount = 0;
-    for (int i = 0; i < SKIN_COUNT; i++) if (skinUnlocked(i)) skinCount++;
-    canvas.printf("%d/%d", skinCount, SKIN_COUNT); y += line;
+    canvas.setCursor(10, y); canvas.print("PETS:              ");
+    int petCount = 0;
+    for (int i = 0; i < PET_COUNT; i++) if (petUnlocked(i)) petCount++;
+    canvas.printf("%d/%d", petCount, PET_COUNT); y += line;
 
-    if (save.campaign50Won) {
+    if (save.campaignWon) {
       canvas.setTextColor(0x07E0, C_BG);
       canvas.setCursor(10, y);
       canvas.print("CAMPANHA VENCIDA!");
     }
 
     canvas.setTextColor(C_DIM, C_BG);
-    canvas.setCursor(70, 220); canvas.print("SELECT/CROSS p/ voltar");
+    canvas.setCursor(70, 222); canvas.print("SELECT/CROSS p/ voltar");
   }
 
   // ===== PAUSA =====
@@ -3200,11 +3662,6 @@ void render() {
     canvas.setTextColor(TFT_YELLOW, C_BG);
     canvas.setTextSize(2);
     canvas.setCursor(125, 113); canvas.print("PAUSA");
-    canvas.setTextSize(1);canvas.setTextColor(C_DIM,C_BG);
-    canvas.setCursor(40,158);canvas.printf("DRAW %lu SPI %lu LOGIC %lu ms",
-      (unsigned long)(perf.maxDrawUs/1000), (unsigned long)(perf.maxPushUs/1000),
-      (unsigned long)(perf.maxLogicUs/1000));
-    canvas.setCursor(40,170);canvas.printf("SLOW %lu",(unsigned long)perf.slowFrames);
   }
 
   // ===== GAME OVER =====
@@ -3213,7 +3670,7 @@ void render() {
     canvas.drawRect(30, 60, SCREEN_W - 60, 130, C_ENEMY1);
     canvas.drawRect(32, 62, SCREEN_W - 64, 126, C_ENEMY1);
 
-    bool venceu = wonThisGame;
+    bool venceu = game.wonThisGame;
 
     canvas.setTextColor(venceu ? 0x07E0 : C_ENEMY1, C_BG);
     canvas.setTextSize(2);
@@ -3230,7 +3687,7 @@ void render() {
     canvas.setTextColor(C_COIN, C_BG);
     canvas.printf("MOEDAS: +%d", game.coinsEarned);
 
-    if (newHighScoreThisGame) {
+    if (game.newHighScore) {
       canvas.setTextColor(C_BULLET, C_BG);
       canvas.setCursor(75, 145);
       canvas.print("*** NOVO RECORDE ***");
@@ -3245,13 +3702,18 @@ void render() {
     canvas.print("START p/ menu");
   }
 
-  if(game.state == RESET_CONFIRM) {
-    canvas.fillRect(28,70,264,100,C_BG);
-    canvas.drawRect(28,70,264,100,TFT_YELLOW);
-    canvas.setTextSize(2);canvas.setTextColor(TFT_YELLOW,C_BG);
-    canvas.setCursor(55,82);canvas.print("APAGAR DADOS?");
-    canvas.setTextSize(1);canvas.setCursor(48,122);
-    canvas.print("CROSS = SIM   SELECT = CANCELAR");
+  // ===== RESET CONFIRM =====
+  if (game.state == RESET_CONFIRM) {
+    canvas.fillRect(24, 60, SCREEN_W - 48, 116, C_BG);
+    canvas.drawRect(24, 60, SCREEN_W - 48, 116, C_ENEMY1);
+    canvas.setTextSize(2);
+    canvas.setTextColor(C_ENEMY1, C_BG);
+    canvas.setCursor(52, 73); canvas.print("APAGAR DADOS?");
+    canvas.setTextSize(1);
+    canvas.setTextColor(C_UI, C_BG);
+    canvas.setCursor(37, 113); canvas.print("Recordes, moedas, pets e naves");
+    canvas.setCursor(37, 129); canvas.print("serao apagados. Irreversivel!");
+    canvas.setCursor(45, 151); canvas.print("CROSS=CONFIRMAR SELECT=SAIR");
   }
 
   // ===== TRANSICAO =====
@@ -3259,11 +3721,7 @@ void render() {
     drawTransition();
   }
 
-  // Enviar sempre 0,0 evita deixar bordas sem atualizar apos screen shake.
-  unsigned long spiStart=micros();
-  canvas.pushSprite(0,0);
-  uint32_t spiUs=micros()-spiStart;
-  if(spiUs>perf.maxPushUs) perf.maxPushUs=spiUs;
+  canvas.pushSprite(shakeX, shakeY);
 }
 
 // =============================================================
@@ -3275,7 +3733,7 @@ void setup() {
 
   Serial.println();
   Serial.println("================================");
-  Serial.println(" SPACE SHOOTER v5.0");
+  Serial.printf(" SPACE SHOOTER %s\n", GAME_VERSION);
   Serial.println(" ESP32-S3 + ILI9341 + DABBLE");
   Serial.println("================================");
 
@@ -3285,7 +3743,7 @@ void setup() {
 
   initSaveDefaults();
   loadSave();
-  checkSkinUnlocks();
+  checkAchievements();
 
   tft.init();
   tft.setRotation(2);
@@ -3314,151 +3772,289 @@ void setup() {
 // =============================================================
 // LOOP
 // =============================================================
-unsigned long lastFrame=0, lastDisplay=0;
-GameState lastDisplayedState=GAME_OVER;
-constexpr unsigned long FRAME_MS=16;
-bool prevUp=false,prevDown=false,prevLeft=false,prevRight=false;
-bool prevCross=false,prevStart=false,prevSelect=false,prevTriangle=false;
+unsigned long lastFrame = 0;
+const int FRAME_MS = 16;
+
+unsigned long pauseStartMs = 0;
+bool resetConfirmReleased = false;
+bool lastStart = false;
+bool lastSelect = false;
+bool lastTriangle = false;
+bool lastSquare = false;
 
 void loop() {
-  pollDabble(); // BLE em toda iteracao, independente do FPS do display
-  unsigned long now=millis();
-  if(now-lastFrame<FRAME_MS) return;
-  unsigned long dt=now-lastFrame;
-  lastFrame=now;
-  if(dt>50) dt=50; // sem salto enorme quando o SPI demora
-  uint32_t logicStart=micros();
-  bool up=navUpNow(),down=navDownNow(),left=navLeftNow(),right=navRightNow();
-  bool pU=up&&!prevUp,pD=down&&!prevDown,pL=left&&!prevLeft,pR=right&&!prevRight;
-  bool pC=input.cross&&!prevCross,pS=input.start&&!prevStart;
-  bool pB=input.select&&!prevSelect,pT=input.triangle&&!prevTriangle;
-  GameState state=game.state; // evento so afeta UMA tela por frame
+  pollDabble();
 
-  if(state==MENU) {
-    if(pU) menuSelection=(menuSelection+MENU_ITEMS-1)%MENU_ITEMS;
-    if(pD) menuSelection=(menuSelection+1)%MENU_ITEMS;
-    if(pC||pS) {
-      switch(menuSelection) {
-        case 0: modeSelection=0;game.state=MODE_SELECT;break;
-        case 1: skinSelection=save.currentSkin;game.state=SKIN_SELECT;break;
-        case 2: shipSelection=save.currentShip;game.state=SHIP_SELECT;break;
-        case 3: shopTab=0;shopIndex=0;game.state=SHOP;break;
-        case 4: shopScroll=0;game.state=ACHV_SCREEN;break;
-        case 5: ctrlSelection=0;game.state=CTRL_SELECT;break;
-        case 6: game.state=STATS;break;
-        case 7: game.state=RESET_CONFIRM;break;
+  // Evita gravação da flash em momentos críticos de gameplay/SPI/BLE.
+  if (saveDirty && game.state != PLAYING && game.state != TRANSITION &&
+      millis() - lastSaveTime > SAVE_MIN_INTERVAL) {
+    saveAll();
+  }
+
+  unsigned long now = millis();
+  if (now - lastFrame < FRAME_MS) { yield(); return; }
+  lastFrame = now;
+
+
+  if (input.start && !lastStart) {
+    if (game.state == PLAYING) {
+      game.state = PAUSED;
+      pauseStartMs = millis();
+    } else if (game.state == PAUSED) {
+      unsigned long pauseDelta = millis() - pauseStartMs;
+      game.levelStartTime += pauseDelta;
+      game.lastEnemySpawn += pauseDelta;
+      game.lastFireTime += pauseDelta;
+      game.lastKillTime += pauseDelta;
+      if (game.hitInvulnerableUntil) game.hitInvulnerableUntil += pauseDelta;
+      if (boss.active) {
+        boss.lastAttack += pauseDelta;
+        boss.spawnTime += pauseDelta;
+        boss.lastPhaseSwap += pauseDelta;
+        if (boss.shielded) boss.shieldUntil += pauseDelta;
+      }
+      for (int i = 0; i < MAX_ENEMIES; i++) if (enemies[i].active) {
+        enemies[i].lastShot += pauseDelta;
+        enemies[i].lastSpecial += pauseDelta;
+      }
+      for (int i = 0; i < MAX_PETS; i++) if (pets[i].active) {
+        pets[i].lastShot += pauseDelta;
+        pets[i].lastSpecial += pauseDelta;
+      }
+      game.state = PLAYING;
+      game.lastGameTickMs = millis();
+    }
+  }
+  lastStart = input.start;
+
+  if (input.select && !lastSelect) {
+    if (game.state == GAME_OVER ||
+        game.state == PAUSED || game.state == SKIN_SELECT ||
+        game.state == MODE_SELECT || game.state == CTRL_SELECT ||
+        game.state == SHOP || game.state == SHIP_SELECT ||
+        game.state == PET_SHOP ||
+        game.state == ACHV_SCREEN || game.state == STATS ||
+        game.state == RESET_CONFIRM) {
+      game.state = MENU;
+      saveAll();
+    }
+  }
+  lastSelect = input.select;
+
+  if (input.triangle && !lastTriangle) {
+    if (game.state == PLAYING) tryDash();
+  }
+  lastTriangle = input.triangle;
+
+  if (input.square && !lastSquare) {
+    if (game.state == PLAYING) useBomb();
+  }
+  lastSquare = input.square;
+
+  // ===== MENU =====
+  if (game.state == MENU) {
+    static bool lU = false, lD = false, lC = false;
+    if (input.up   && !lU) { menuSelection--; if (menuSelection < 0) menuSelection = MENU_ITEMS - 1; }
+    if (input.down && !lD) { menuSelection++; if (menuSelection >= MENU_ITEMS) menuSelection = 0; }
+    if ((input.cross || input.start) && !lC) {
+      switch (menuSelection) {
+        case 0: modeSelection = 0; game.state = MODE_SELECT; break;
+        case 1: skinSelection = save.currentSkin; game.state = SKIN_SELECT; break;
+        case 2: shipSelection = save.currentShip; game.state = SHIP_SELECT; break;
+        case 3: shopTab = 0; shopIndex = 0; shopScroll = 0; game.state = SHOP; break;
+        case 4: petSelection = 0; game.state = PET_SHOP; break;
+        case 5: shopScroll = 0; game.state = ACHV_SCREEN; break;
+        case 6: ctrlSelection = 0; game.state = CTRL_SELECT; break;
+        case 7: game.state = STATS; break;
+        case 8: resetConfirmReleased = false; game.state = RESET_CONFIRM; break;
       }
     }
+    lU = input.up; lD = input.down; lC = input.cross || input.start;
     updateStars();
-  } else if(state==MODE_SELECT) {
-    if(pU||pD) modeSelection=(modeSelection+1)%MODE_ITEMS;
-    if(pB) game.state=MENU;
-    else if(pC) {
-      game.mode=(modeSelection==0)?MODE_CAMPAIGN:MODE_ENDLESS;
-      resetGame();game.state=TRANSITION;game.stateTimer=0;
+  }
+
+  // ===== RESET CONFIRM =====
+  else if (game.state == RESET_CONFIRM) {
+    // Exige soltar o botao antes do segundo CROSS/START.
+    if (!input.cross && !input.start) resetConfirmReleased = true;
+    if (resetConfirmReleased && (input.cross || input.start)) {
+      resetSave();
+      resetConfirmReleased = false;
+      game.state = MENU;
     }
-  } else if(state==SKIN_SELECT) {
-    if(pU) skinSelection=(skinSelection+SKIN_COUNT-1)%SKIN_COUNT;
-    if(pD) skinSelection=(skinSelection+1)%SKIN_COUNT;
-    if(pB) game.state=MENU;
-    else if(pC && skinUnlocked(skinSelection)) {
-      save.currentSkin=skinSelection;saveAll();game.state=MENU;
+  }
+
+  // ===== MODE SELECT =====
+  else if (game.state == MODE_SELECT) {
+    static bool lU = false, lD = false, lC = false;
+    if (input.up   && !lU) { modeSelection--; if (modeSelection < 0) modeSelection = MODE_ITEMS - 1; }
+    if (input.down && !lD) { modeSelection++; if (modeSelection >= MODE_ITEMS) modeSelection = 0; }
+    if ((input.cross || input.start) && !lC) {
+      game.mode = (modeSelection == 0) ? MODE_CAMPAIGN : MODE_ENDLESS;
+      resetGame();
+      game.state = TRANSITION;
+      game.stateTimer = 0;
     }
-  } else if(state==SHIP_SELECT) {
-    if(pU) shipSelection=(shipSelection+SHIP_COUNT-1)%SHIP_COUNT;
-    if(pD) shipSelection=(shipSelection+1)%SHIP_COUNT;
-    if(pB) game.state=MENU;
-    else if(pC) {
-      if(shipUnlocked(shipSelection)) {save.currentShip=shipSelection;saveAll();game.state=MENU;}
-      else {shopTab=SHOP_TAB_SHIPS;shopIndex=shipSelection;game.state=SHOP;}
+    lU = input.up; lD = input.down; lC = input.cross || input.start;
+  }
+
+  // ===== SKIN SELECT =====
+  else if (game.state == SKIN_SELECT) {
+    static bool lU = false, lD = false, lC = false;
+    if (input.up   && !lU) { skinSelection--; if (skinSelection < 0) skinSelection = SKIN_COUNT - 1; }
+    if (input.down && !lD) { skinSelection++; if (skinSelection >= SKIN_COUNT) skinSelection = 0; }
+    if ((input.cross || input.start) && !lC) {
+      save.currentSkin = skinSelection;
+      saveAll();
+      game.state = MENU;
     }
-  } else if(state==SHOP) {
-    if(pB) game.state=MENU;
-    else {
-      int count=(shopTab==SHOP_TAB_SHIPS)?SHIP_COUNT:UPG_COUNT;
-      if(pU) shopIndex=(shopIndex+count-1)%count;
-      if(pD) shopIndex=(shopIndex+1)%count;
-      if(pL||pR) {shopTab=(shopTab+1)%SHOP_TAB_COUNT;shopIndex=0;}
-      else if(pC) {
-        if(shopTab==SHOP_TAB_SHIPS) {
-          if(!shipUnlocked(shopIndex) && save.coins>=SHIPS[shopIndex].cost) {
-            save.coins-=SHIPS[shopIndex].cost;
-            save.unlockedShips |= (1<<shopIndex);
-            save.currentShip=shopIndex;
-            saveAll(); // gravacao fora da partida
-          }
-        } else {
-          int cost=upgradeCost(shopIndex);
-          if(cost>0 && save.coins>=cost) {
-            save.coins-=cost;++save.upgradeLevels[shopIndex];saveAll();
-          }
+    lU = input.up; lD = input.down; lC = input.cross || input.start;
+  }
+
+  // ===== SHIP SELECT =====
+  else if (game.state == SHIP_SELECT) {
+    static bool lU = false, lD = false, lC = false;
+    if (input.up   && !lU) { shipSelection--; if (shipSelection < 0) shipSelection = SHIP_COUNT - 1; }
+    if (input.down && !lD) { shipSelection++; if (shipSelection >= SHIP_COUNT) shipSelection = 0; }
+    if ((input.cross || input.start) && !lC) {
+      if (shipUnlocked(shipSelection)) {
+        save.currentShip = shipSelection;
+        saveAll();
+        game.state = MENU;
+      } else {
+        shopTab = 0;
+        shopIndex = shipSelection;
+        game.state = SHOP;
+      }
+    }
+    lU = input.up; lD = input.down; lC = input.cross || input.start;
+  }
+
+  // ===== SHOP =====
+  else if (game.state == SHOP) {
+    static bool lU = false, lD = false, lL = false, lR = false, lC = false;
+    int maxItems = (shopTab == 0) ? SHIP_COUNT : UPG_COUNT;
+
+    if (input.up   && !lU) {
+      shopIndex--;
+      if (shopIndex < 0) shopIndex = maxItems - 1;
+      if (shopTab == 1 && shopIndex < shopScroll) shopScroll = shopIndex;
+    }
+    if (input.down && !lD) {
+      shopIndex++;
+      if (shopIndex >= maxItems) shopIndex = 0;
+      if (shopTab == 1 && shopIndex >= shopScroll + 9) shopScroll = shopIndex - 8;
+    }
+    if (input.left && !lL) {
+      shopTab--;
+      if (shopTab < 0) shopTab = SHOP_TAB_COUNT - 1;
+      shopIndex = 0; shopScroll = 0;
+    }
+    if (input.right && !lR) {
+      shopTab++;
+      if (shopTab >= SHOP_TAB_COUNT) shopTab = 0;
+      shopIndex = 0; shopScroll = 0;
+    }
+    if ((input.cross || input.start) && !lC) {
+      if (shopTab == 0) {
+        if (!shipUnlocked(shopIndex) && save.coins >= SHIPS[shopIndex].cost) {
+          save.coins -= SHIPS[shopIndex].cost;
+          save.unlockedShips |= (1 << shopIndex);
+          save.currentShip = shopIndex;
+          saveAll();
+          checkAchievements();
+        }
+      } else {
+        int cost = upgradeCost(shopIndex);
+        if (cost > 0 && save.coins >= cost) {
+          save.coins -= cost;
+          save.upgradeLevels[shopIndex]++;
+          saveAll();
+          checkAchievements();
         }
       }
     }
-  } else if(state==ACHV_SCREEN) {
-    if(pB||pC) game.state=MENU;
-    else {if(pU && shopScroll>0)--shopScroll;
-      if(pD && shopScroll<ACHV_COUNT-12)++shopScroll;}
-  } else if(state==CTRL_SELECT) {
-    if(pU) ctrlSelection=(ctrlSelection+3)%4;
-    if(pD) ctrlSelection=(ctrlSelection+1)%4;
-    if(pB) game.state=MENU;
-    else if(pC) {
-      if(ctrlSelection<3) save.controlMode=ctrlSelection;
-      else save.invertY=!save.invertY;
+    lU = input.up; lD = input.down; lC = input.cross || input.start;
+    lL = input.left; lR = input.right;
+  }
+
+  // ===== PET SHOP =====
+  else if (game.state == PET_SHOP) {
+    static bool lU = false, lD = false, lC = false;
+    if (input.up   && !lU) { petSelection--; if (petSelection < 0) petSelection = PET_COUNT - 1; }
+    if (input.down && !lD) { petSelection++; if (petSelection >= PET_COUNT) petSelection = 0; }
+    if ((input.cross || input.start) && !lC) {
+      if (!petUnlocked(petSelection) && save.coins >= PETS[petSelection].cost) {
+        save.coins -= PETS[petSelection].cost;
+        save.unlockedPets |= (1 << petSelection);
+        saveAll();
+        checkAchievements();
+      }
+    }
+    lU = input.up; lD = input.down; lC = input.cross || input.start;
+  }
+
+  // ===== ACHIEVEMENTS =====
+  else if (game.state == ACHV_SCREEN) {
+    static bool lU = false, lD = false;
+    if (input.up   && !lU) { shopScroll--; if (shopScroll < 0) shopScroll = 0; }
+    if (input.down && !lD) { shopScroll++; if (shopScroll > ACHV_COUNT - 12) shopScroll = ACHV_COUNT - 12; if (shopScroll < 0) shopScroll = 0; }
+    lU = input.up; lD = input.down;
+  }
+
+  // ===== CTRL =====
+  else if (game.state == CTRL_SELECT) {
+    static bool lU = false, lD = false, lC = false;
+    if (input.up   && !lU) { ctrlSelection--; if (ctrlSelection < 0) ctrlSelection = 3; }
+    if (input.down && !lD) { ctrlSelection++; if (ctrlSelection > 3) ctrlSelection = 0; }
+    if ((input.cross || input.start) && !lC) {
+      if (ctrlSelection == 0)      save.controlMode = CTRL_DIGITAL;
+      else if (ctrlSelection == 1) save.controlMode = CTRL_JOYSTICK;
+      else if (ctrlSelection == 2) save.controlMode = CTRL_AUTO;
+      else if (ctrlSelection == 3) save.invertY = !save.invertY;
       saveAll();
     }
-  } else if(state==STATS) {
-    if(pB||pC||pS) game.state=MENU;
-  } else if(state==RESET_CONFIRM) {
-    if(pB) game.state=MENU;
-    else if(pC) {
-      resetSave();game.state=MENU;menuSelection=0;
-    }
-  } else if(state==TRANSITION) {
-    // a transicao e atualizada na renderizacao a 24FPS; nao adianta o relogio do jogo.
-    if(pB) game.state=MENU;
-  } else if(state==PLAYING) {
-    if(pS) game.state=PAUSED;
-    else {
-      gameClockMs+=dt;
-      if(pT) tryDash();
-      updateStars();updatePlayer();tryFire();updateBullets();
-      updateEnemyBullets();
-      if(game.state==PLAYING) updateEnemies();
-      if(game.state==PLAYING) updateBoss();
-      if(game.state==PLAYING) checkBulletHits();
-      if(game.state==PLAYING) updatePowerUps();
-      if(game.state==PLAYING) updateCoins();
-      if(game.state==PLAYING) updateTimers();
-      updateParticles();
-    }
-  } else if(state==PAUSED) {
-    if(pS) game.state=PLAYING;
-    else if(pB) { // encerrar partida na pausa, contabilizando moedas/estatisticas
-      onGameOver();commitGameSave();game.state=MENU;
-    }
-  } else if(state==GAME_OVER) {
-    updateStars();updateParticles();
-    if(pS||pB||pC) {
-      commitGameSave();game.state=MENU;
-    } else if(pendingGameSave && millis()-gameOverWallMs>=900) {
-      commitGameSave(); // escreve flash quando resultado ja foi exibido
+    lU = input.up; lD = input.down; lC = input.cross || input.start;
+  }
+
+  // ===== PLAYING =====
+  else if (game.state == PLAYING) {
+    unsigned long elapsedTick = millis() - game.lastGameTickMs;
+    if (elapsedTick <= 100) game.activePlayMs += elapsedTick;
+    game.lastGameTickMs = millis();
+    updateStars();
+    updatePlayer();
+    updatePets();
+    tryFire();
+    updateBullets();
+    updateEnemyBullets();
+    if (game.state == PLAYING) updateEnemies();
+    if (game.state == PLAYING) updateBoss();
+    if (game.state == PLAYING) checkBulletHits();
+    updateParticles();
+    if (game.state == PLAYING) {
+      updatePowerUps();
+      updateCoins();
+      updateTimers();
     }
   }
 
-  uint32_t logicUs=micros()-logicStart;
-  if(logicUs>perf.maxLogicUs) perf.maxLogicUs=logicUs;
-  unsigned long displayNow=millis();
-  if(displayNow-lastDisplay>=DISPLAY_FRAME_MS || game.state!=lastDisplayedState) {
-    lastDisplay=displayNow;
-    uint32_t renderStart=micros();render();
-    uint32_t renderUs=micros()-renderStart;
-    if(renderUs>perf.maxDrawUs) perf.maxDrawUs=renderUs;
-    if(renderUs>DISPLAY_FRAME_MS*1000UL)++perf.slowFrames;
-    lastDisplayedState=game.state;
+  else if (game.state == PAUSED) { game.lastGameTickMs = millis(); }
+
+  else if (game.state == GAME_OVER) {
+    updateStars();
+    updateParticles();
+
+    static bool lRestart = false;
+    if (input.start && !lRestart) {
+      game.state = MENU;
+    }
+    lRestart = input.start;
   }
-  prevUp=up;prevDown=down;prevLeft=left;prevRight=right;
-  prevCross=input.cross;prevStart=input.start;
-  prevSelect=input.select;prevTriangle=input.triangle;
+
+  else if (game.state == TRANSITION) { /* feito no render */ }
+
+  render();
+
+  yield();
 }
