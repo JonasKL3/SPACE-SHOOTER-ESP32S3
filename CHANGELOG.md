@@ -1,5 +1,14 @@
 # Changelog
 
+## [6.5.6] — Boss Intro, Bomb HUD and ESP32 Diagnostics
+
+- Fases de 12s; cutscene de boss, preparação da arena e proteção contra espera infinita.
+- Bomba SQUARE, contador/cooldown visual; debug X+SELECT na pausa e Konami da loja.
+- Telemetria de reset, RTC breadcrumbs, heap/PSRAM/stack e tempos de subsistemas.
+- Morte de boss e spawn de fragmentos deferidos para fim dos loops de colisão.
+- Preservadas todas as correções da v6.0.0.
+- 82min51s de gameplay **simulado** e 2.703.662 verificações; **teste físico ainda pendente**.
+
 ## [6.0.0] — Deep Test Fixed (sem debug Konami)
 
 ### Novidades

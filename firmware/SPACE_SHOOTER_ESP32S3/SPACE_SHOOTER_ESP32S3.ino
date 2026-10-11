@@ -6,6 +6,10 @@
 
    NOVIDADES v6.0.0:
      - BOMBA funcionando (SQUARE para usar)
+     - Konami Code na LOJA: cima cima baixo baixo
+       esquerda direita esquerda direita + CROSS + CIRCLE
+       => 999.999 moedas (modo debug)
+     - Popup visual "MODO DEBUG ATIVADO"
      - Versao do jogo no canto inferior direito do menu
      - useBomb() completo (inimigos + boss)
      - Throttle de NVS + yield no loop
@@ -20,7 +24,7 @@
 #include <Preferences.h>
 #include <math.h>
 
-#define GAME_VERSION "v6.0.0"
+#define GAME_VERSION "v6.5.6"
 
 // =============================================================
 // DISPLAY
@@ -76,6 +80,7 @@ const int AREA_H = 205;
 #define C_HIGHLIGHT   0x0841
 #define C_DIM         0x7BEF
 #define C_HP_BG       0x3000
+#define C_DEBUG       0xFFE0
 
 // =============================================================
 // TIPOS DE ARMA
@@ -298,6 +303,7 @@ enum AchvType {
   ACHV_PET_OWNER,
   ACHV_PET_COLLECTOR,
   ACHV_MAXED_SHIP,
+  ACHV_KONAMI,
   ACHV_COUNT
 };
 
@@ -326,6 +332,7 @@ const AchvInfo ACHIEVEMENTS[ACHV_COUNT] = {
   { "Amigo Fiel",        "Compre um pet",          100 },
   { "Zoologico",         "Compre todos os pets",   500 },
   { "Engenheiro",        "Maxeie uma nave",        300 },
+  { "Konami!",           "Descubra o codigo secreto", 0 }
 };
 
 // =============================================================
@@ -477,6 +484,7 @@ enum GameState {
   PAUSED,
   GAME_OVER,
   TRANSITION,
+  BOSS_INTRO,
   RESET_CONFIRM,
   GAME_STATE_COUNT
 };
@@ -504,6 +512,8 @@ struct Game {
   WeaponType weapon;
   int weaponTimer;
   int nextBossLevel;
+  bool bossPending;
+  unsigned long bossPrepStartMs;
   Scenario scenario;
 
   float dashVX, dashVY;
@@ -527,6 +537,7 @@ struct Game {
 
   int revivesLeft;
   int bombsLeft;
+  int bombCooldown;
   unsigned long lastReviveCheck;
   unsigned long hitInvulnerableUntil;
   bool newHighScore;
@@ -543,6 +554,12 @@ Star stars[MAX_STARS];
 PowerUp powerups[MAX_POWERUPS];
 Coin coins[MAX_COINS];
 Pet pets[MAX_PETS];
+
+// Defer structural entity changes until collision iteration ends.
+struct PendingEnemySpawn {float x,y;};
+PendingEnemySpawn pendingEnemySpawns[MAX_ENEMIES*2];
+int pendingEnemySpawnCount = 0;
+bool bossKillPending = false;
 
 uint16_t currentBgTint = 0x0000;
 
@@ -596,6 +613,10 @@ SaveData save;
 bool saveDirty = false;
 unsigned long lastSaveTime = 0;
 const unsigned long SAVE_MIN_INTERVAL = 3000;
+const unsigned long LEVEL_DURATION_MS = 12000UL;
+const unsigned long BOSS_CLEANUP_GRACE_MS = 6000UL;
+const int BOSS_INTRO_FRAMES = 120;  // 1.92s a 16ms/quadro
+const int BOMB_COOLDOWN_FRAMES = 180; // 2.88s a 16ms/quadro
 
 void markSaveDirty() { saveDirty = true; }
 
@@ -620,6 +641,89 @@ void initSaveDefaults() {
   save.unlockedPets = 0;
 }
 
+// Diagnosticos novos: o codigo recebido so ANUNCIAVA snapshots RTC,
+// mas nao continha implementacao. Esta integracao acrescenta breadcrumbs
+// (RAM RTC, nunca NVS/flash), tempos maximos e estado do heap.
+// RTC_NOINIT_ATTR pode nao sobreviver a brownout/perda total de alimentacao.
+#if defined(ESP32)
+#include <esp_system.h>
+#include <esp_attr.h>
+#include <esp_heap_caps.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+RTC_NOINIT_ATTR volatile uint32_t diagRtcMagic;
+RTC_NOINIT_ATTR volatile uint32_t diagRtcStage;
+RTC_NOINIT_ATTR volatile uint32_t diagRtcSub;
+RTC_NOINIT_ATTR volatile uint32_t diagRtcFrame;
+RTC_NOINIT_ATTR volatile uint32_t diagRtcLevel;
+constexpr uint32_t DIAG_MAGIC = 0x53A65EEDu;
+uint32_t diagFrameCounter = 0;
+uint32_t diagMaxBLEus = 0, diagMaxGameus = 0, diagMaxRenderus = 0;
+// Maxima duracao continua de cada checkpoint: BLE, gameplay, boss, etc.
+uint32_t diagMaxStageUs[11] = {};
+uint32_t diagLastCheckpointUs = 0;
+uint32_t diagLastStage = 0;
+uint32_t diagSlowFrameCount = 0;
+unsigned long diagLastHealth = 0;
+const char *diagStageName(uint32_t s) {
+  switch(s) {
+    case 1: return "BLE"; case 2: return "LOGIC"; case 3: return "PLAYER";
+    case 4: return "ENEMIES"; case 5: return "BOSS"; case 6: return "COLLISIONS";
+    case 7: return "TIMERS"; case 8: return "RENDER_SPI";
+    case 9: return "NVS"; case 10: return "BOSS_INTRO";
+    default: return "IDLE";
+  }
+}
+void diagMark(uint32_t stage, uint32_t sub = 0) {
+  const uint32_t now = micros();
+  if (diagLastCheckpointUs && diagLastStage > 0 && diagLastStage <= 10) {
+    const uint32_t elapsed = now - diagLastCheckpointUs;
+    if (elapsed > diagMaxStageUs[diagLastStage]) diagMaxStageUs[diagLastStage]=elapsed;
+  }
+  diagLastStage=stage;
+  diagLastCheckpointUs=now;
+  diagRtcMagic = DIAG_MAGIC;
+  diagRtcStage = stage;
+  diagRtcSub = sub;
+  diagRtcFrame = diagFrameCounter;
+  diagRtcLevel = (uint32_t)game.level;
+}
+void printBootResetReason() {
+  Serial.printf("[RESET_DIAG] reason=%d\n", (int)esp_reset_reason());
+  if (diagRtcMagic == DIAG_MAGIC) {
+    Serial.printf("[PREVIOUS] stage=%s sub=%lu frame=%lu level=%lu\n",
+      diagStageName(diagRtcStage), (unsigned long)diagRtcSub,
+      (unsigned long)diagRtcFrame, (unsigned long)diagRtcLevel);
+  } else Serial.println("[PREVIOUS] RTC sem dados validos");
+  diagMark(0);
+}
+void diagHealth() {
+  if (millis() - diagLastHealth < 15000UL) return;
+  diagLastHealth = millis();
+  const size_t heapFree=heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+  const size_t heapMin=heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
+  const size_t heapLargest=heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+  const size_t psramFree=heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+  const size_t psramMin=heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM);
+  const UBaseType_t stackMin=uxTaskGetStackHighWaterMark(nullptr);
+  Serial.printf("[HEALTH] level=%d state=%d heap=%u min=%u largest=%u psram=%u psramMin=%u stackHWM=%u maxBLEus=%lu maxGameus=%lu maxRenderus=%lu slow=%lu\n",
+      game.level, (int)game.state, (unsigned)heapFree, (unsigned)heapMin,
+      (unsigned)heapLargest, (unsigned)psramFree, (unsigned)psramMin,
+      (unsigned)stackMin, (unsigned long)diagMaxBLEus,
+      (unsigned long)diagMaxGameus, (unsigned long)diagMaxRenderus,
+      (unsigned long)diagSlowFrameCount);
+  Serial.printf("[SUBSYSTEMS] player=%lu enemies=%lu boss=%lu collisions=%lu timers=%lu nvs=%lu intro=%lu\n",
+      (unsigned long)diagMaxStageUs[3], (unsigned long)diagMaxStageUs[4],
+      (unsigned long)diagMaxStageUs[5], (unsigned long)diagMaxStageUs[6],
+      (unsigned long)diagMaxStageUs[7], (unsigned long)diagMaxStageUs[9],
+      (unsigned long)diagMaxStageUs[10]);
+}
+#else
+void diagMark(uint32_t stage, uint32_t sub=0) { (void)stage; (void)sub; }
+void printBootResetReason() {}
+void diagHealth() {}
+#endif
+
 // =============================================================
 // FORWARD DECLARATIONS
 // =============================================================
@@ -641,6 +745,12 @@ void initStars();
 void resetGame();
 void spawnEnemy();
 void spawnBoss(BossType type);
+void queueEnemySpawn(float x, float y);
+void processPendingEnemySpawns();
+void requestBossKill();
+void processPendingBossKill();
+void updateBossIntro();
+void drawBossIntro();
 void updateBoss();
 void drawBoss();
 void drawPlayer();
@@ -685,7 +795,7 @@ struct InputState {
   bool dpadActive; // no AUTO, D-pad tem prioridade sobre o joystick
 };
 
-InputState input = {false,false,false,false,false,false,false,false,false,false,0,0,false};
+InputState input = {};  // all buttons and dpadActive start false
 unsigned long lastDabblePoll = 0;
 const unsigned long DABBLE_POLL_MS = 30;
 
@@ -715,15 +825,28 @@ int shopIndex = 0;
 int shopScroll = 0;
 
 // =============================================================
-// POPUPS (conquistas)
+// KONAMI CODE (declarado ANTES da função que o usa)
+// =============================================================
+enum KonamiKey { K_UP, K_DOWN, K_LEFT, K_RIGHT, K_CROSS, K_CIRCLE };
+const KonamiKey KONAMI_SEQ[] = {
+  K_UP, K_UP, K_DOWN, K_DOWN, K_LEFT, K_RIGHT, K_LEFT, K_RIGHT, K_CROSS, K_CIRCLE
+};
+const int KONAMI_LEN = 10;
+
+int konamiProgress = 0;
+bool konamiActive = false;
+
+// =============================================================
+// POPUPS (achievement + debug)
 // =============================================================
 struct Popup {
   bool active;
   int  idx;
   unsigned long startTime;
   int  timer;
+  bool isDebug;
 };
-Popup popup = {false, 0, 0, 0};
+Popup popup = {false, 0, 0, 0, false};
 
 // =============================================================
 // UTIL
@@ -757,6 +880,7 @@ void unlockAchv(AchvType type) {
   popup.idx = (int)type;
   popup.startTime = millis();
   popup.timer = 240;
+  popup.isDebug = false;
   Serial.printf(">>> ACHV: %s (+%d)\n",
                 ACHIEVEMENTS[(int)type].name, ACHIEVEMENTS[(int)type].reward);
   markSaveDirty();
@@ -790,6 +914,37 @@ void checkAchievements() {
     if (save.upgradeLevels[i] < UPGRADES[i].maxLevel) { allUpg = false; break; }
   }
   if (allShips && allUpg) unlockAchv(ACHV_MAXED_SHIP);
+}
+
+// =============================================================
+// KONAMI CODE — funções
+// =============================================================
+void resetKonami() {
+  konamiProgress = 0;
+}
+
+void feedKonami(KonamiKey k) {
+  if (konamiActive) return;
+  if (k == KONAMI_SEQ[konamiProgress]) {
+    konamiProgress++;
+    if (konamiProgress >= KONAMI_LEN) {
+      konamiActive = true;
+      save.coins = 999999;
+      saveAll();
+      unlockAchv(ACHV_KONAMI);
+      popup.active = true;
+      popup.idx = -1;
+      popup.startTime = millis();
+      popup.timer = 240;
+      popup.isDebug = true;
+      Serial.println(">>> KONAMI CODE ATIVADO! 999.999 moedas <<<");
+      konamiProgress = 0;
+    }
+  } else if (k == KONAMI_SEQ[0]) {
+    konamiProgress = 1;
+  } else {
+    konamiProgress = 0;
+  }
 }
 
 // =============================================================
@@ -904,6 +1059,8 @@ void saveAll() {
 
 void resetSave() {
   initSaveDefaults();
+  konamiActive = false;
+  konamiProgress = 0;
   saveAll();
   Serial.println("NVS resetado.");
 }
@@ -1059,6 +1216,8 @@ void resetGame() {
   game.weapon = ship.startWeapon;
   game.weaponTimer = 0;
   game.nextBossLevel = 5;
+  game.bossPending = false;
+  game.bossPrepStartMs = 0;
   game.scenario = SC_SPACE;
 
   game.dashVX = 0;
@@ -1081,6 +1240,7 @@ void resetGame() {
 
   game.revivesLeft = save.upgradeLevels[UPG_REVIVE];
   game.bombsLeft = save.upgradeLevels[UPG_START_BOMB];
+  game.bombCooldown = 0;
   game.lastReviveCheck = millis();
   game.hitInvulnerableUntil = 0;
   game.newHighScore = false;
@@ -1089,6 +1249,8 @@ void resetGame() {
   game.lastGameTickMs = millis();
 
   boss.active = false;
+  bossKillPending = false;
+  pendingEnemySpawnCount = 0;
 
   for (int i = 0; i < MAX_PETS; i++) {
     pets[i].active = false;
@@ -1218,6 +1380,38 @@ void spawnEnemy() {
   }
 }
 
+void queueEnemySpawn(float x, float y) {
+  if (pendingEnemySpawnCount >= MAX_ENEMIES*2) return;
+  pendingEnemySpawns[pendingEnemySpawnCount++] = {x,y};
+}
+void processPendingEnemySpawns() {
+  for(int j=0; j<pendingEnemySpawnCount; ++j) {
+    for(int n=0;n<MAX_ENEMIES;++n) {
+      if (enemies[n].active) continue;
+      enemies[n].type=0;enemies[n].hp=1;enemies[n].maxHp=1;
+      enemies[n].w=14;enemies[n].h=14;
+      enemies[n].x=pendingEnemySpawns[j].x;
+      enemies[n].y=pendingEnemySpawns[j].y;
+      enemies[n].vy=2.0f;enemies[n].vx=0;
+      enemies[n].lastShot=millis();
+      enemies[n].lastSpecial=millis();
+      enemies[n].specialTimer=0;
+      enemies[n].active=true;
+      break;
+    }
+  }
+  pendingEnemySpawnCount=0;
+}
+void requestBossKill() { if(boss.active) bossKillPending=true; }
+void processPendingBossKill() {
+  if (!bossKillPending) return;
+  bossKillPending=false;
+  if (boss.active && boss.hp<=0) {
+    diagMark(5, 99);  // boss death + possible campaign end/NVS write
+    onBossKilled();
+  }
+}
+
 void spawnParticles(float x, float y, int count, uint16_t color) {
   int spawned = 0;
   for (int i = 0; i < MAX_PARTICLES && spawned < count; i++) {
@@ -1309,8 +1503,9 @@ void flash(uint16_t color, int frames) {
 // BOMBA
 // =============================================================
 void useBomb() {
-  if (game.bombsLeft <= 0) return;
+  if (game.bombsLeft <= 0 || game.bombCooldown > 0) return;
   game.bombsLeft--;
+  game.bombCooldown = BOMB_COOLDOWN_FRAMES;
 
   // A lista de partículas tem limite fixo: 12 efeitos distribuídos são
   // suficientes para preencher a tela, evitando dezenas de varreduras extras.
@@ -1421,6 +1616,9 @@ void damagePlayer(float x, float y) {
 // BOSSES
 // =============================================================
 void spawnBoss(BossType type) {
+  if ((int)type < 0 || (int)type >= 10) return;
+  for (int i = 0; i < MAX_BULLETS; i++) bullets[i].active = false;
+  for (int i = 0; i < MAX_ENEMY_BULLS; i++) enemyBullets[i].active = false;
   boss.active = true;
   boss.type = type;
 
@@ -1430,7 +1628,7 @@ void spawnBoss(BossType type) {
   boss.w = cfg.w;
   boss.h = cfg.h;
   boss.x = AREA_X + AREA_W / 2.0f;
-  boss.y = AREA_Y + 45;
+  boss.y = AREA_Y - boss.h - 30; // entrada animada
   boss.vx = cfg.speed;
   boss.vy = 0;
   boss.phase = 1;
@@ -1742,6 +1940,8 @@ void onBossKilled() {
   }
 
   boss.active = false;
+  game.bossPending = false;
+  game.levelStartTime = millis();
   game.bossesKilled++;
   save.totalBosses++;
 
@@ -2204,11 +2404,14 @@ void drawUI() {
     canvas.printf("RV%d", game.revivesLeft);
   }
 
-  if (game.bombsLeft > 0) {
-    canvas.setTextColor(C_ENEMY9, C_BG);
-    canvas.setCursor(115, 24);
-    canvas.printf("B%d", game.bombsLeft);
-  }
+  canvas.setTextColor(game.bombsLeft > 0 ? C_ENEMY9 : C_DIM, C_BG);
+  canvas.setCursor(115, 24);
+  canvas.printf("B%d", game.bombsLeft);
+  const int bx = 135, bw = 32;
+  canvas.drawRect(bx, 24, bw, 4, C_DIM);
+  const int cooldownPct = game.bombsLeft == 0 ? 0 :
+      (game.bombCooldown > 0 ? bw - bw * game.bombCooldown / BOMB_COOLDOWN_FRAMES : bw);
+  if (cooldownPct > 0) canvas.fillRect(bx, 24, cooldownPct, 4, C_ENEMY9);
 
   if (game.combo > 1 && millis() - game.lastKillTime < 1500) {
     int cx = SCREEN_W / 2 - 22;
@@ -2653,7 +2856,7 @@ void checkBulletHits() {
         if (bullets[b].pierce > 0) bullets[b].pierce--;
         else bullets[b].active = false;
 
-        if (boss.hp <= 0) onBossKilled();
+        if (boss.hp <= 0) requestBossKill();
         continue;
       }
     }
@@ -2714,26 +2917,8 @@ void checkBulletHits() {
           if (random(0, 100) < 14) spawnPowerUp(enemies[e].x, enemies[e].y);
 
           if (enemies[e].type == 7) {
-            for (int k = -1; k <= 1; k += 2) {
-              for (int n = 0; n < MAX_ENEMIES; n++) {
-                if (!enemies[n].active) {
-                  enemies[n].type = 0;
-                  enemies[n].hp = 1;
-                  enemies[n].maxHp = 1;
-                  enemies[n].w = 14;
-                  enemies[n].h = 14;
-                  enemies[n].x = enemies[e].x + k * 10;
-                  enemies[n].y = enemies[e].y;
-                  enemies[n].vy = 2.0f;
-                  enemies[n].vx = 0;
-                  enemies[n].lastShot = millis();
-                  enemies[n].lastSpecial = millis();
-                  enemies[n].specialTimer = 0;
-                  enemies[n].active = true;
-                  break;
-                }
-              }
-            }
+            queueEnemySpawn(enemies[e].x-10, enemies[e].y);
+            queueEnemySpawn(enemies[e].x+10, enemies[e].y);
           }
 
           enemies[e].active = false;
@@ -2774,11 +2959,14 @@ void checkBulletHits() {
         if (millis() % 150 < 20) {
           boss.hp -= 1;
           spawnParticles(pets[p].x, pets[p].y, 3, 0xF81F);
-          if (boss.hp <= 0) onBossKilled();
+          if (boss.hp <= 0) requestBossKill();
         }
       }
     }
-  }
+  }  // Resolve all mutations after processing every projectile/pet.
+  processPendingBossKill();
+  if (game.state == PLAYING) processPendingEnemySpawns();
+  else pendingEnemySpawnCount = 0;
 }
 
 // =============================================================
@@ -2861,47 +3049,59 @@ void updateCoins() {
 // =============================================================
 void updateTimers() {
   if (game.shieldTimer > 0) game.shieldTimer--;
-  if (game.weaponTimer > 0) {
-    game.weaponTimer--;
-    if (game.weaponTimer == 0) {
-      game.weapon = SHIPS[save.currentShip].startWeapon;
-    }
-  }
+  if (game.weaponTimer > 0 && --game.weaponTimer == 0)
+    game.weapon = SHIPS[save.currentShip].startWeapon;
+  if (game.bombCooldown > 0) game.bombCooldown--;
 
-  unsigned long levelDuration = 20000;
-  unsigned long elapsed = millis() - game.levelStartTime;
-
-  int maxLevel = (game.mode == MODE_CAMPAIGN) ? 50 : 999;
-  int timeLevel = game.level + (int)(elapsed / levelDuration);
-  if (timeLevel > maxLevel) timeLevel = maxLevel;
-
-  if (timeLevel > game.level) {
-    if (!game.tookDamageThisLevel && game.level >= 1) {
+  const unsigned long now = millis();
+  const int maxLevel = (game.mode == MODE_CAMPAIGN) ? 50 : 999;
+  if (!boss.active && !game.bossPending && game.level < maxLevel &&
+      now - game.levelStartTime >= LEVEL_DURATION_MS) {
+    if (!game.tookDamageThisLevel && game.level >= 1)
       unlockAchv(ACHV_NO_HIT_LEVEL);
-    }
-
-    game.level = timeLevel;
-    game.levelStartTime = millis();
-    if (game.enemySpawnInterval > 300) game.enemySpawnInterval -= 30;
-    if (game.fireCooldown > 90)       game.fireCooldown       -= 5;
+    const int nextLevel = game.level + 1;
     game.tookDamageThisLevel = false;
-
-    if (save.upgradeLevels[UPG_START_BOMB] > 0) {
-      game.bombsLeft = save.upgradeLevels[UPG_START_BOMB];
+    if (nextLevel == game.nextBossLevel) {
+      // Never spawn more enemies while waiting for the boss.
+      game.bossPending = true;
+      game.bossPrepStartMs = now;
+      for (int i = 0; i < MAX_ENEMY_BULLS; ++i) enemyBullets[i].active = false;
+    } else {
+      game.level = nextLevel;
+      game.levelStartTime = now;
+      if (game.enemySpawnInterval > 420) game.enemySpawnInterval -= 12;
+      if (game.enemySpawnInterval < 420) game.enemySpawnInterval = 420;
+      if (save.upgradeLevels[UPG_START_BOMB] > 0)
+        game.bombsLeft = save.upgradeLevels[UPG_START_BOMB];
+      game.bombCooldown = 0;
     }
   }
 
-  if (!boss.active && game.level >= game.nextBossLevel) {
-    for (int i = 0; i < MAX_ENEMIES; i++) enemies[i].active = false;
-    for (int i = 0; i < MAX_ENEMY_BULLS; i++) enemyBullets[i].active = false;
-
-    int idx = (game.nextBossLevel / 5 - 1) % 10;
-    spawnBoss((BossType)idx);
+  if (game.bossPending && !boss.active) {
+    bool anyEnemy = false;
+    for (int i = 0; i < MAX_ENEMIES; ++i) {
+      if (enemies[i].active) { anyEnemy = true; break; }
+    }
+    // Snipers/healers can remain stationary. Never wait forever for cleanup.
+    if (!anyEnemy || now - game.bossPrepStartMs >= BOSS_CLEANUP_GRACE_MS) {
+      if (anyEnemy) {
+        for (int i = 0; i < MAX_ENEMIES; ++i) enemies[i].active = false;
+      }
+      for (int i = 0; i < MAX_ENEMY_BULLS; ++i) enemyBullets[i].active = false;
+      const int idx = (game.nextBossLevel / 5 - 1) % 10;
+      game.level = game.nextBossLevel;
+      game.bossPending = false;
+      game.stateTimer = 0;
+      spawnBoss((BossType)idx);
+      game.state = BOSS_INTRO;
+      game.levelStartTime = now;
+      Serial.printf("ENTRADA BOSS %d apos fase %d\n", idx, game.level);
+    }
   }
-
-  if (!boss.active && millis() - game.lastEnemySpawn > game.enemySpawnInterval) {
+  if (!boss.active && !game.bossPending && game.state == PLAYING &&
+      now - game.lastEnemySpawn > game.enemySpawnInterval) {
     spawnEnemy();
-    game.lastEnemySpawn = millis();
+    game.lastEnemySpawn = now;
   }
 }
 
@@ -2953,6 +3153,49 @@ void drawPixelArtShipFullscreen(int shipType, int frame) {
     canvas.drawPixel(sx, sy, 0xFFFF);
     canvas.drawPixel(sx, sy + 1, 0xBFFF);
   }
+}
+
+// Cutscene v6.5.6: boss enters from above, gameplay input/time frozen.
+void updateBossIntro() {
+  if (!boss.active) { game.state = PLAYING; game.stateTimer = 0; return; }
+  const int t = game.stateTimer > BOSS_INTRO_FRAMES ? BOSS_INTRO_FRAMES : game.stateTimer;
+  const float startY = AREA_Y - boss.h - 30.0f;
+  const float targetY = AREA_Y + 50.0f;
+  const float p = (float)t / (float)BOSS_INTRO_FRAMES;
+  const float easing = 1.0f - powf(1.0f - p, 3.0f);
+  boss.y = startY + (targetY - startY) * easing;
+  if ((t % 4) == 0) {
+    spawnParticles(boss.x + randf(-boss.w * .35f, boss.w * .35f),
+                   boss.y - boss.h * .35f, 2, 0xFFFF);
+  }
+  ++game.stateTimer;
+  if (game.stateTimer >= BOSS_INTRO_FRAMES) {
+    boss.y = targetY;
+    boss.lastAttack = millis();
+    boss.lastPhaseSwap = millis();
+    game.levelStartTime = millis();
+    game.lastGameTickMs = millis();
+    game.stateTimer = 0;
+    game.state = PLAYING;
+  }
+}
+
+void drawBossIntro() {
+  canvas.fillRect(AREA_X, AREA_Y, AREA_W, AREA_H, C_BG);
+  for (int i = 0; i < 18; ++i) {
+    const int sx = AREA_X + ((i * 37 + game.stateTimer * 3) % AREA_W);
+    const int sy = AREA_Y + ((i * 19 + game.stateTimer * 5) % AREA_H);
+    canvas.drawLine(sx, sy, sx, sy + 5, C_DIM);
+  }
+  drawBoss();
+  drawPets();
+  drawPlayer();
+  canvas.setTextColor(C_ENEMY9, C_BG);
+  canvas.setTextSize(1);
+  canvas.setCursor(105, 65);
+  canvas.print("BOSS INCOMING");
+  canvas.setCursor(128, 77);
+  canvas.printf("FASE %d", game.level);
 }
 
 void drawTransition() {
@@ -3092,6 +3335,7 @@ void render() {
   }
 
   drawUI();
+  if (game.state == BOSS_INTRO) drawBossIntro();
 
   if (popup.active) {
     int t = popup.timer;
@@ -3099,23 +3343,33 @@ void render() {
     if (t > 220) y = 40 - (240 - t) * 2;
     else if (t < 20) y = 40 + (20 - t) * 2;
 
-    const uint16_t borderCol = C_COIN;
-    const uint16_t textCol = C_COIN;
+    uint16_t borderCol = popup.isDebug ? C_DEBUG : C_COIN;
+    uint16_t textCol = popup.isDebug ? C_DEBUG : C_COIN;
 
     canvas.fillRect(20, y, SCREEN_W - 40, 32, 0x0000);
     canvas.drawRect(20, y, SCREEN_W - 40, 32, borderCol);
     canvas.drawRect(21, y + 1, SCREEN_W - 42, 30, borderCol);
 
-    canvas.setTextColor(textCol, 0x0000);
-    canvas.setTextSize(1);
-    canvas.setCursor(28, y + 6);
-    canvas.print("ACHIEVEMENT!");
-    canvas.setTextColor(0xFFFF, 0x0000);
-    canvas.setCursor(28, y + 18);
-    canvas.print(ACHIEVEMENTS[popup.idx].name);
-    canvas.setTextColor(textCol, 0x0000);
-    canvas.setCursor(SCREEN_W - 65, y + 18);
-    canvas.printf("+%d$", ACHIEVEMENTS[popup.idx].reward);
+    if (popup.isDebug) {
+      canvas.setTextColor(textCol, 0x0000);
+      canvas.setTextSize(1);
+      canvas.setCursor(28, y + 6);
+      canvas.print("MODO DEBUG");
+      canvas.setTextColor(0xFFFF, 0x0000);
+      canvas.setCursor(28, y + 18);
+      canvas.print("999.999 moedas adicionadas!");
+    } else {
+      canvas.setTextColor(textCol, 0x0000);
+      canvas.setTextSize(1);
+      canvas.setCursor(28, y + 6);
+      canvas.print("ACHIEVEMENT!");
+      canvas.setTextColor(0xFFFF, 0x0000);
+      canvas.setCursor(28, y + 18);
+      canvas.print(ACHIEVEMENTS[popup.idx].name);
+      canvas.setTextColor(textCol, 0x0000);
+      canvas.setCursor(SCREEN_W - 65, y + 18);
+      canvas.printf("+%d$", ACHIEVEMENTS[popup.idx].reward);
+    }
 
     popup.timer--;
     if (popup.timer <= 0) popup.active = false;
@@ -3195,7 +3449,7 @@ void render() {
 
     canvas.setTextColor(C_DIM, C_BG);
     canvas.setTextSize(1);
-    canvas.setCursor(SCREEN_W - 38, SCREEN_H - 12);
+    canvas.setCursor(SCREEN_W - 93, SCREEN_H - 12);
     canvas.print(GAME_VERSION);
 
     canvas.setCursor(60, SCREEN_H - 12); canvas.print("UP/DOWN  CROSS=OK");
@@ -3736,6 +3990,7 @@ void setup() {
   Serial.printf(" SPACE SHOOTER %s\n", GAME_VERSION);
   Serial.println(" ESP32-S3 + ILI9341 + DABBLE");
   Serial.println("================================");
+  printBootResetReason();
 
   Serial.printf("PSRAM livre: %d bytes\n", ESP.getFreePsram());
   Serial.printf("SRAM livre:  %d bytes\n", ESP.getFreeHeap());
@@ -3781,20 +4036,88 @@ bool lastStart = false;
 bool lastSelect = false;
 bool lastTriangle = false;
 bool lastSquare = false;
+bool lastDebugCombo = false;
+
+bool lastKonamiUp = false, lastKonamiDown = false;
+bool lastKonamiLeft = false, lastKonamiRight = false;
+bool lastKonamiCross = false, lastKonamiCircle = false;
+
+// New convenience access from v6.5.6; original SHOP Konami stays available.
+void activatePauseDebug() {
+  if (konamiActive) return;
+  konamiActive = true;
+  konamiProgress = 0;
+  save.coins = 999999;
+  markSaveDirty();
+  unlockAchv(ACHV_KONAMI);
+  popup.active = true;
+  popup.idx = -1;
+  popup.startTime = millis();
+  popup.timer = 240;
+  popup.isDebug = true;
+  // Only called in PAUSED, never writes to flash during active gameplay.
+  saveAll();
+  Serial.println("DEBUG: 999999 moedas durante pausa");
+}
+
+void feedKonamiInputs() {
+  if (game.state != SHOP) {
+    if (konamiProgress > 0) konamiProgress = 0;
+    return;
+  }
+  if (konamiActive) return;
+
+  if (input.up && !lastKonamiUp)       feedKonami(K_UP);
+  if (input.down && !lastKonamiDown)   feedKonami(K_DOWN);
+  if (input.left && !lastKonamiLeft)   feedKonami(K_LEFT);
+  if (input.right && !lastKonamiRight) feedKonami(K_RIGHT);
+  if (input.cross && !lastKonamiCross) feedKonami(K_CROSS);
+  if (input.circle && !lastKonamiCircle) feedKonami(K_CIRCLE);
+
+  lastKonamiUp = input.up;
+  lastKonamiDown = input.down;
+  lastKonamiLeft = input.left;
+  lastKonamiRight = input.right;
+  lastKonamiCross = input.cross;
+  lastKonamiCircle = input.circle;
+}
 
 void loop() {
+#if defined(ESP32)
+  const uint32_t loopBLEstart = micros();
+#endif
+  diagMark(1);
   pollDabble();
+#if defined(ESP32)
+  const uint32_t bleElapsed = micros() - loopBLEstart;
+  if (bleElapsed > diagMaxBLEus) diagMaxBLEus = bleElapsed;
+#endif
 
   // Evita gravação da flash em momentos críticos de gameplay/SPI/BLE.
   if (saveDirty && game.state != PLAYING && game.state != TRANSITION &&
+      game.state != BOSS_INTRO &&
       millis() - lastSaveTime > SAVE_MIN_INTERVAL) {
+    diagMark(9);
     saveAll();
   }
 
   unsigned long now = millis();
   if (now - lastFrame < FRAME_MS) { yield(); return; }
   lastFrame = now;
+#if defined(ESP32)
+  const uint32_t logicStart = micros();
+  ++diagFrameCounter;
+#endif
+  diagMark(2);
+  feedKonamiInputs();
 
+  // X + SELECT in PAUSED: consume SELECT so it never exits accidentally.
+  const bool debugCombo = game.state == PAUSED && input.cross && input.select;
+  if (debugCombo && !lastDebugCombo) {
+    activatePauseDebug();
+    lastSelect = true;
+  }
+  lastDebugCombo = debugCombo;
 
   if (input.start && !lastStart) {
     if (game.state == PLAYING) {
@@ -4023,23 +4346,29 @@ void loop() {
     if (elapsedTick <= 100) game.activePlayMs += elapsedTick;
     game.lastGameTickMs = millis();
     updateStars();
-    updatePlayer();
-    updatePets();
-    tryFire();
-    updateBullets();
-    updateEnemyBullets();
-    if (game.state == PLAYING) updateEnemies();
-    if (game.state == PLAYING) updateBoss();
-    if (game.state == PLAYING) checkBulletHits();
+    diagMark(3,1); updatePlayer();
+    diagMark(3,2); updatePets();
+    diagMark(3,3); tryFire();
+    diagMark(4,1); updateBullets();
+    diagMark(4,2); updateEnemyBullets();
+    if (game.state == PLAYING) { diagMark(4,3); updateEnemies(); }
+    if (game.state == PLAYING) { diagMark(5); updateBoss(); }
+    if (game.state == PLAYING) { diagMark(6); checkBulletHits(); }
     updateParticles();
     if (game.state == PLAYING) {
-      updatePowerUps();
-      updateCoins();
-      updateTimers();
+      diagMark(7,1); updatePowerUps();
+      diagMark(7,2); updateCoins();
+      diagMark(7,3); updateTimers();
     }
   }
 
   else if (game.state == PAUSED) { game.lastGameTickMs = millis(); }
+  else if (game.state == BOSS_INTRO) {
+    diagMark(10);
+    updateStars();
+    updateParticles();
+    updateBossIntro();
+  }
 
   else if (game.state == GAME_OVER) {
     updateStars();
@@ -4054,7 +4383,19 @@ void loop() {
 
   else if (game.state == TRANSITION) { /* feito no render */ }
 
+#if defined(ESP32)
+  const uint32_t logicElapsed = micros() - logicStart;
+  if (logicElapsed > diagMaxGameus) diagMaxGameus = logicElapsed;
+  if (logicElapsed > 16000) ++diagSlowFrameCount;
+  const uint32_t renderStart = micros();
+#endif
+  diagMark(8);
   render();
-
+#if defined(ESP32)
+  const uint32_t renderElapsed = micros() - renderStart;
+  if (renderElapsed > diagMaxRenderus) diagMaxRenderus = renderElapsed;
+#endif
+  diagMark(0);
+  diagHealth();
   yield();
 }
