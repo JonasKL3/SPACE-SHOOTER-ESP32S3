@@ -923,7 +923,7 @@ void resetKonami() {
   konamiProgress = 0;
 }
 
-void feedKonami(KonamiKey k) {
+void feedKonami(int k) {
   if (konamiActive) return;
   if (k == KONAMI_SEQ[konamiProgress]) {
     konamiProgress++;
