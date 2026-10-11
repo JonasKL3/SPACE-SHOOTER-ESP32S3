@@ -1,6 +1,6 @@
 # SPACE SHOOTER v6.5.6 — Notas de lançamento
 
-Nova versão integrada sobre a base testada, preservando as correções da v6.0.0.
+**Release v6.5.6 substituída a pedido do autor após correção de compilação real.** Esta publicação contém `feedKonami(int k)` no lugar de `feedKonami(KonamiKey k)`: a Arduino IDE gerava um protótipo automático que usava o tipo antes de sua declaração. A alteração mantém todas as funcionalidades do Konami e preserva as correções da v6.0.0.
 
 ### Recursos
 - Fases normais de 12 segundos, preparação da arena com espera máxima de 6 segundos.
@@ -19,6 +19,6 @@ Todos os 5 pets, migração de saves v5, RESET DATA confirmado, blindado corrigi
 - Fuzz: **5 × 680 s = 56min40s**, 346 derrotas/reinícios.
 - **2.703.662 verificações**, 310.723 quadros nos testes prolongados, AddressSanitizer/UndefinedBehaviorSanitizer sem falhas detectadas.
 
-**Riscos conhecidos:** a compilação com Arduino-ESP32 real e a validação na placa física ainda estão pendentes. O patch do DabbleESP32 é externo ao firmware e deve estar instalado antes de recompilar. Observe os diagnósticos no Serial.
+**Verificação atualizada:** o autor confirmou que **compilou e testou esta correção na ESP32-S3 real**. Duração do teste físico não informada; os testes de 82min51s descritos acima foram simulados. O patch do DabbleESP32 é externo ao firmware e deve estar instalado antes de recompilar. Observe os diagnósticos no Serial.
 
 A branch `release/v6.0.0` preserva o snapshot anterior **sem Konami/debug**, conforme solicitado.

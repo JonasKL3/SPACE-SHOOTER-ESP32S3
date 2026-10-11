@@ -1,6 +1,6 @@
 # SPACE-SHOOTER-ESP32S3
 
-**SPACE SHOOTER v6.5.6** — ESP32-S3 N16R8 / ILI9341 320×240 / Dabble BLE GamePad.
+**SPACE SHOOTER v6.5.6 (hotfix Arduino IDE aplicado)** — ESP32-S3 N16R8 / ILI9341 320×240 / Dabble BLE GamePad.
 
 ## Novidades da v6.5.6
 - **Fases de 12 segundos**, preparação segura da arena e **entrada animada do boss**.
@@ -17,7 +17,7 @@
 ## Testes
 Na simulação C++17 com ASan/UBSan: **10min11s** campanha (50 níveis, 10 bosses), **16min** Endless, **56min40s** estresse aleatório (346 derrotas/reinícios). Total de **82min51s simulados**, 310.723 frames e 2.703.662 verificações, sem erro de memória detectado.
 
-**Limite importante:** sem compilação com o core Arduino-ESP32 real e sem 10 minutos de teste físico. Faça isso antes de uso prolongado. A biblioteca DabbleESP32 precisa manter o patch externo que evita o antigo `heap_caps_free`.
+**Validação atualizada:** o autor compilou com sucesso na Arduino IDE e testou o firmware com o hotfix `feedKonami(int k)` na ESP32-S3. A duração do teste físico não foi informada; os 82min51s descritos acima são **simulados**. A biblioteca DabbleESP32 precisa manter o patch externo contra o antigo `heap_caps_free`.
 
 ## Instalação
 1. Verifique core Arduino-ESP32, TFT_eSPI, DabbleESP32 e a [correção da biblioteca DabbleESP32](docs/DABBLE_BLE_RESET.md).

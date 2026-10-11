@@ -1,6 +1,10 @@
 # Changelog
 
-## [6.5.6] — Boss Intro, Bomb HUD and ESP32 Diagnostics
+## [6.5.6] — Boss Intro, Bomb HUD and ESP32 Diagnostics (republicada com hotfix Arduino)
+
+- **Hotfix de compilação na Arduino IDE:** `void feedKonami(KonamiKey k)` alterado para `void feedKonami(int k)` para evitar protótipo automático antes da definição de `KonamiKey`.
+- **Compilação e teste na ESP32-S3 confirmados pelo autor** depois do hotfix; duração do teste físico não informada.
+- Release original v6.5.6 substituída com autorização do autor; tag e ZIP passam a apontar para o firmware corrigido.
 
 - Fases de 12s; cutscene de boss, preparação da arena e proteção contra espera infinita.
 - Bomba SQUARE, contador/cooldown visual; debug X+SELECT na pausa e Konami da loja.
